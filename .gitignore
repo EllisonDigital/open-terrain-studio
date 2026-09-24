@@ -1,0 +1,19 @@
+# Rust
+/target/
+
+# Godot
+/app/.godot/
+/app/bin/
+/build/
+/.godot-cache/
+
+# Project caches and build output
+*.otstudio.tmp
+.otstudio-cache/
+/output/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
