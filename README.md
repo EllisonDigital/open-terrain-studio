@@ -1,93 +1,121 @@
 # OpenTerrainStudio
 
+**A free, open-source, node-based terrain authoring application.**
 
+Build a landscape in a node graph, shape it with noise, erosion and water simulation, colour it, grow vegetation on it, preview it live in 3D, then export heightmaps, masks, colour maps, meshes and vegetation data into Unreal Engine, Blender, Godot or any other tool.
 
-## Getting started
+OpenTerrainStudio is built with a Rust terrain engine and a Godot 4 editor, and is developed by **EllisonDigital**.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+> **Status: pre-alpha (v0.1).** The foundation works end to end: node graph, live 3D preview, save/load and EXR/PNG export, packaged for Windows, macOS and Linux. See the [roadmap](docs/ROADMAP.md) for what's next.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+![OpenTerrainStudio v0.1: node graph, 3D preview and inspector](docs/images/editor-v0.1.png)
 
-## Add your files
+---
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Planned features
 
+- **Node graph workflow**: primitives, noise, terrain shapes, filters and masks, with any node output previewable and exportable.
+- **Erosion and hydrology**: hydraulic and thermal erosion, rivers, lakes, sea and snow, with flow, wear and deposition maps.
+- **Colour tab**: a dedicated graph for colouring the terrain and producing splat/weight maps.
+- **Vegetation**: Trees, Shrubs and Grass populations that react to slope, height, water and each other, exported as density masks and point data.
+- **Resolution independence**: preview fast at low resolution, build at up to 16K and beyond with the same result.
+- **GPU acceleration**, with a full CPU fallback for older hardware.
+- **Engine-ready export**: EXR, 16-bit PNG, RAW, GLB, OBJ and CSV/JSON, with presets for Unreal, Godot and Blender.
+
+## Download
+
+Builds for Windows, macOS and Linux are attached to each release on the
+[Releases page](https://gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio/-/releases).
+Download the zip for your system, unzip it and run OpenTerrainStudio. Nothing else needs installing.
+
+| System | Download | Notes |
+| --- | --- | --- |
+| Windows 10/11 (x86_64) | `OpenTerrainStudio-<version>-windows-x86_64.zip` | Keep `terrain_godot.dll` next to the `.exe`. The build isn't signed yet, so SmartScreen may warn: choose *More info → Run anyway*. |
+| macOS 11+ (Apple Silicon and Intel) | `OpenTerrainStudio-<version>-macos-universal.zip` | Not notarised yet: right-click `OpenTerrainStudio.app` → *Open* the first time, or run `xattr -dr com.apple.quarantine OpenTerrainStudio.app`. |
+| Linux (x86_64) | `OpenTerrainStudio-<version>-linux-x86_64.zip` | Keep `libterrain_godot.so` next to `OpenTerrainStudio.x86_64`. Needs Vulkan drivers. |
+
+To use exported heightmaps in Blender, Unreal Engine or Godot, see the [export guides](docs/export-guides.md).
+
+## Documentation
+
+- [Export guides](docs/export-guides.md): importing heightmaps into Blender, Unreal Engine and Godot at the right scale.
+- [Architecture](docs/ARCHITECTURE.md): how the application and terrain engine are designed.
+- [Roadmap](docs/ROADMAP.md): milestones from v0.1 to v1.0, risks and decisions.
+
+## Building from source
+
+You need:
+
+- [Rust](https://rustup.rs) 1.94 or newer (stable)
+- [Godot](https://godotengine.org/download) 4.6 or newer (the standard build, not .NET)
+
+```sh
+git clone https://gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio.git
+cd open-terrain-studio
+cargo build          # builds the Rust terrain engine and the Godot extension
+godot --path app     # runs the app
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio.git
-git branch -M main
-git push -uf origin main
+
+`godot` is whatever you called the Godot executable. You can also open `app/project.godot` in the Godot
+editor and press Play. After changing Rust code, run `cargo build` again and restart the app.
+
+### Packaging the app
+
+Packaged builds use Godot's export templates, which must match the Godot version exactly. That version
+is pinned in [`.godot-version`](.godot-version) (currently 4.7.2) and CI uses the same file.
+
+```sh
+scripts/fetch-godot.sh --templates             # Linux: downloads that Godot and its export templates
+GODOT=.godot-cache/4.7.2/godot scripts/package.sh
 ```
 
-## Integrate with your tools
+`scripts/package.sh` builds the release library, copies it into `app/bin/` (release builds load it from
+there, development builds from `target/debug`), exports the app and zips it into `build/`. It packages
+the current OS by default. Godot can export all three from Linux, given each OS's library in a folder:
+`LIB_DIR=dist scripts/package.sh linux windows macos`. On Windows, use `scripts\package.ps1`. On other
+systems, install the templates from the Godot editor (*Editor → Manage Export Templates*).
 
-* [Set up project integrations](https://gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio/-/settings/integrations)
+Pushing a `v*` tag makes CI build the library on all three OSes, export the apps and publish a GitLab
+Release; see [`.gitlab-ci.yml`](.gitlab-ci.yml).
 
-## Collaborate with your team
+### Using the app (v0.1)
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+- **Right-click the graph** (or press *Add node*) to add nodes. Drag from an output to an input to connect.
+- **Click a node** to preview it in 3D and edit its settings on the right. Click empty space for world settings.
+- **Viewport:** drag to orbit, Shift-drag or middle-drag to pan, scroll to zoom, <kbd>F</kbd> to frame.
+- **File → Export Viewed Node** writes a 32-bit EXR (heights in metres) and/or a 16-bit PNG (0–65535 = the
+  world height range), plus a `build.json` with the world size, height range and Unreal import values.
 
-## Test and Deploy
+v0.1 nodes: Constant, Perlin, Simplex, fBm, Combine, Levels.
 
-Use the built-in continuous integration in GitLab.
+### Tests
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```sh
+cargo test --workspace
+godot --headless --path app --script res://tests/smoke_test.gd
+godot --path app --script res://tests/ui_test.gd        # needs a display (or xvfb-run) and a GPU
+```
 
 ## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md), including how to add a node (pure Rust, no UI code). Issues and merge requests are handled on GitLab:
+`gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio`
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+Every commit must be signed off under the [Developer Certificate of Origin](https://developercertificate.org/). Use `git commit -s` to add the `Signed-off-by:` line.
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+## Trademark
+
+The source code is open, but the name "OpenTerrainStudio" and its logo belong to EllisonDigital. You are welcome to fork the project, but please release forks under a different name.
+
+OpenTerrainStudio is an independent project and is not affiliated with QuadSpinner or Gaea.

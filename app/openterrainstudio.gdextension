@@ -1,0 +1,21 @@
+; Loads the Rust terrain engine (crates/terrain-godot) into Godot.
+;
+; Debug (the editor and `godot --path app`): loaded straight from the Cargo
+; target folder, so `cargo build` is all you need during development.
+; Release (exported app): Godot only exports libraries inside res://, so
+; scripts/package.sh copies the release build into app/bin/ first. On export
+; Godot copies the library next to the executable (Windows, Linux) or into
+; Contents/Frameworks (macOS) and rewrites these paths for the exported app.
+
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.6
+reloadable = true
+
+[libraries]
+linux.debug.x86_64 = "res://../target/debug/libterrain_godot.so"
+linux.release.x86_64 = "res://bin/libterrain_godot.so"
+windows.debug.x86_64 = "res://../target/debug/terrain_godot.dll"
+windows.release.x86_64 = "res://bin/terrain_godot.dll"
+macos.debug = "res://../target/debug/libterrain_godot.dylib"
+macos.release = "res://bin/libterrain_godot.dylib"

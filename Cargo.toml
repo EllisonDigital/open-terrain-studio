@@ -1,0 +1,39 @@
+[workspace]
+resolver = "3"
+members = ["crates/terrain-core", "crates/terrain-nodes", "crates/terrain-godot"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+authors = ["EllisonDigital"]
+repository = "https://gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio"
+publish = false
+
+[workspace.dependencies]
+terrain-core = { path = "crates/terrain-core" }
+terrain-nodes = { path = "crates/terrain-nodes" }
+
+# Godot bindings: pinned exactly (pre-1.0, breaking changes between minors).
+# api-4-6 = the extension loads in Godot 4.6 and every later 4.x release.
+godot = { version = "=0.5.5", default-features = false, features = ["api-4-6", "__codegen-full"] }
+
+rayon = "1.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+libm = "0.2"
+exr = "1.73"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.dev]
+# Terrain maths is far too slow unoptimised; keep debug info but optimise.
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

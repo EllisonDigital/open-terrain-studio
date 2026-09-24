@@ -1,0 +1,19 @@
+[package]
+name = "terrain-core"
+description = "OpenTerrainStudio terrain engine: data model, node graph, evaluator, project files and export."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+libm.workspace = true
+exr.workspace = true
+image.workspace = true
