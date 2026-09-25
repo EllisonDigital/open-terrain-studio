@@ -94,7 +94,7 @@ jobs:
   godot-gpu:
     runs-on: ubuntu-latest
     env:
-      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -105,7 +105,11 @@ jobs:
           key: godot-editor-pinned-${{ hashFiles('.godot-version') }}
       - run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq unzip xvfb xauth mesa-vulkan-drivers libvulkan1 libgl1 libx11-6 libxcursor1 libxinerama1 libxrandr2 libxi6 libxext6 libxrender1 libfontconfig1
+          sudo apt-get install -y -qq unzip xvfb xauth vulkan-tools mesa-vulkan-drivers libvulkan1 libgl1 libx11-6 libxcursor1 libxinerama1 libxrandr2 libxi6 libxext6 libxrender1 libfontconfig1
+      - name: Check Mesa Vulkan driver
+        run: |
+          ls -l "$VK_DRIVER_FILES"
+          xvfb-run -a vulkaninfo --summary
       - name: Compare GPU kernels with CPU on Mesa lavapipe
         run: |
           GODOT="$(scripts/fetch-godot.sh)"
