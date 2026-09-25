@@ -1,6 +1,9 @@
 <!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
 # Import helpers handoff
 
+Roadmap milestone: **v0.9 — Import helpers (delivered early)**. This implements
+the import-helper item ahead of the rest of v0.9, not the entire milestone.
+
 Branch: `import-helpers`, based on `origin/v0.2-shaping` at
 `ebb6a3dc6b4135f4c1497f5baf745e5034b371dd` (MR !2).
 Worktree: `../open-terrain-studio-import-helpers`.
