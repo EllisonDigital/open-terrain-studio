@@ -157,3 +157,48 @@ The shape is centred on its node, so it spans `±world_size_m / 2`. Its data is 
 **Rendering:** displace a subdivided `PlaneMesh` in a vertex shader that samples the EXR texture, as the
 OpenTerrainStudio viewport does (`app/shaders/terrain.gdshader`), or use a terrain plugin that accepts a float
 heightmap. Use `filter_nearest` when mesh vertices line up one-to-one with pixels, and `filter_linear` otherwise.
+
+## Import helpers
+
+The optional [import helpers](../import-helpers/README.md) read `build.json` and its listed images,
+including multi-output builds, masks and older single-output exports. They reject a generator other
+than `OpenTerrainStudio`, missing files, and unsupported or contradictory metadata. Keep the image
+files beside the manifest. Different height outputs become separate terrains at the same world
+position; alternative EXR/PNG encodings of one output are deduplicated.
+
+- **Blender:** run `python3 import-helpers/blender/package.py`, install the generated
+  `import-helpers/.work/openterrainstudio-blender.zip` through **Preferences → Add-ons → Install from
+  Disk**, and enable it. Use **File → Import → OpenTerrainStudio build (build.json)**. The add-on creates
+  centred meshes in metres, respects an existing scene unit scale, and exposes masks as packed
+  Non-Color images and point attributes. See the [Blender instructions](../import-helpers/blender/README.md).
+- **Godot:** copy `import-helpers/godot/addons/openterrainstudio_import` into your project's `addons/`,
+  enable it under **Project Settings → Plugins**, then use **Project → Tools → Import OpenTerrainStudio
+  build…**. Choose the manifest and a destination `.scn`/`.tscn`. The scene contains terrain meshes and
+  embedded float height/mask textures; select the root's **Masks** and **Preview Mask** properties.
+  See the [Godot instructions](../import-helpers/godot/README.md). The helper has its own lossless PNG16
+  decoder, so the ordinary Godot PNG precision limitation above does not apply to this import path.
+- **Unreal — untested in Unreal:** copy the bundled `OpenTerrainStudioImport` native plugin into your
+  project's `Plugins/`, build its Editor target, and enable it plus Python Editor Script Plugin and
+  Editor Scripting Utilities. From the Python console, import `ots_import_build` from
+  `import-helpers/unreal` and call `import_build(build_json_path, "/Game/OpenTerrainStudio/Build001")`.
+  Keep the whole helper folder available for its shared validator. Use a non-World-Partition level and
+  PNG16 heightfields at valid Landscape sizes. The script uses the recorded Unreal scales and creates
+  linear layer-weight texture assets for masks; it does not author a Landscape material or painted
+  layers. See the [Unreal setup and limitations](../import-helpers/unreal/README.md).
+
+**Tested on Linux, 25 September 2026:** Blender **5.2.0 LTS**, Godot **4.7.2** and **4.6.2**, and plain
+Python **3.13.5**. Tests use the actual Rust export writer, two terrains and two masks, a rectangular
+world, negative heights, both formats, single-output/mask-only builds, and invalid/missing files.
+Every 129² EXR vertex and mask sample matched the source exactly. PNG-only heights differed by at
+most **0.018433 m** over a 2,400 m range, consistent with 16-bit quantisation and float rounding.
+Godot passed saved-scene reload checks. The packaged Blender add-on passed operator import and
+`.blend` save/reload checks for every vertex, mask attribute and packed image pixel. A **1009²** EXR import in Blender 5.2 and Godot 4.7.2
+matched all **1,018,081** vertex heights exactly, with at most **0.0301 mm** horizontal rounding error.
+Python scale/layout tests and the unchanged Rust `unreal_hints_reproduce_png_heights` test passed.
+Reproduction commands and full results are in the [helper test guide](../import-helpers/README.md#tests).
+
+**Not tested:** Unreal Editor (including native bridge compilation; its API target is UE **5.6**),
+interactive file-dialog clicks, GPU appearance, packaged games, Windows/macOS, or other Blender
+versions. Blender/Godot helpers currently build full-resolution meshes up to 4,194,304 vertices each;
+there is no tiling/LOD, and the Godot helper does not create collision. The Unreal script and bridge
+must be validated in an Unreal project before being described as a tested importer.

@@ -1,0 +1,5 @@
+.work/
+__pycache__/
+*.pyc
+godot/.godot/
+tests/fixture_export/Cargo.lock

@@ -1,0 +1,12 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "OpenTerrainStudio Landscape Import Bridge",
+  "Description": "Editor-only Python bridge to native Landscape creation. UE 5.6 API target; untested in Unreal. SPDX-License-Identifier: MIT OR Apache-2.0",
+  "Category": "Editor",
+  "CreatedBy": "EllisonDigital",
+  "CanContainContent": false,
+  "Modules": [{"Name": "OpenTerrainStudioImport", "Type": "Editor", "LoadingPhase": "Default"}],
+  "Plugins": [{"Name": "PythonScriptPlugin", "Enabled": true}, {"Name": "EditorScriptingUtilities", "Enabled": true}]
+}
