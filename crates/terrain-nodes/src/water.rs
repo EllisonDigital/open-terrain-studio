@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use terrain_core::error::{CoreError, Result};
-use terrain_core::ops::{distance_to, gaussian_blur, smoothstep};
+use terrain_core::ops::{distance_to, gaussian_blur, gradient, smoothstep};
 use terrain_core::{
     EvalContext, Grid, GridSpec, NodeKind, NodeSchema, Outputs, ParamDef, PortDef, PortType, Value,
 };
@@ -639,6 +639,256 @@ impl NodeKind for Rivers {
                     data: riverbank,
                 }),
             ),
+        ]))
+    }
+}
+
+// ---- Sea --------------------------------------------------------------------
+
+/// Flood everything below sea level (that the sea can reach) and shape the coast.
+pub struct Sea {
+    schema: NodeSchema,
+}
+
+impl Default for Sea {
+    fn default() -> Self {
+        Self {
+            schema: NodeSchema {
+                type_id: "simulate.sea".into(),
+                type_version: 1,
+                label: "Sea".into(),
+                category: "Simulate".into(),
+                description: "Floods the terrain below Sea level from the world's edges and wears the land \
+                              just above it into beaches. Outputs the coast-worn Height, the Water surface, \
+                              the Sea mask, a Shallows mask (fading with depth) and a Shoreline mask."
+                    .into(),
+                inputs: vec![PortDef::new("in", "Terrain", PortType::Heightfield)],
+                outputs: vec![
+                    PortDef::new("height", "Height", PortType::Heightfield),
+                    PortDef::new("water_surface", "Water surface", PortType::Heightfield),
+                    PortDef::new("sea", "Sea", PortType::Mask),
+                    PortDef::new("shallow", "Shallows", PortType::Mask),
+                    PortDef::new("shoreline", "Shoreline", PortType::Mask),
+                ],
+                params: vec![
+                    ParamDef::metres("sea_level_m", "Sea level", 200.0, -10_000.0, 20_000.0)
+                        .describe("Height of the sea surface, in metres."),
+                    ParamDef::bool("from_edges", "Only from edges", true).describe(
+                        "Flood only ground the sea can reach from the world's edges. Off: everything below \
+                         sea level is sea, even inland hollows.",
+                    ),
+                    ParamDef::metres("shallow_depth_m", "Shallows depth", 30.0, 0.1, 10_000.0)
+                        .describe("Depth at which the Shallows mask fades to black."),
+                    ParamDef::metres("shore_width_m", "Shore width", 60.0, 0.0, 10_000.0).describe(
+                        "Width of the Shoreline mask on each side of the waterline, and how far inland \
+                         the coast is worn.",
+                    ),
+                    ParamDef::metres("beach_height_m", "Beach height", 10.0, 0.0, 1000.0)
+                        .describe("Land up to this far above sea level near the coast is worn into beaches."),
+                    ParamDef::float("coastal_erosion", "Coastal erosion", 0.6, 0.0, 1.0).describe(
+                        "How much the coast is flattened towards sea level. 0 leaves it unchanged.",
+                    ),
+                ],
+                gpu: false,
+            },
+        }
+    }
+}
+
+/// Cells below `level` connected (4-neighbour) to the grid's edge.
+fn flood_from_edges(h: &[f32], w: usize, ht: usize, level: f32) -> Vec<bool> {
+    let mut sea = vec![false; h.len()];
+    let mut queue: Vec<usize> = (0..h.len())
+        .filter(|&i| {
+            let (x, y) = (i % w, i / w);
+            (x == 0 || y == 0 || x + 1 == w || y + 1 == ht) && h[i] < level
+        })
+        .collect();
+    for &i in &queue {
+        sea[i] = true;
+    }
+    while let Some(c) = queue.pop() {
+        let (x, y) = (c % w, c / w);
+        let near = [
+            (x > 0).then(|| c - 1),
+            (x + 1 < w).then(|| c + 1),
+            (y > 0).then(|| c - w),
+            (y + 1 < ht).then(|| c + w),
+        ];
+        for j in near.into_iter().flatten() {
+            if !sea[j] && h[j] < level {
+                sea[j] = true;
+                queue.push(j);
+            }
+        }
+    }
+    sea
+}
+
+impl NodeKind for Sea {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let t = terrain(ctx)?;
+        let spec = ctx.spec;
+        let (w, ht) = (spec.width as usize, spec.height as usize);
+        let level = ctx.f32("sea_level_m");
+        let sea = if ctx.bool("from_edges") {
+            flood_from_edges(&t.data, w, ht, level)
+        } else {
+            t.data.iter().map(|&h| h < level).collect()
+        };
+        check_cancel(ctx)?;
+        let (shore_w, beach, erosion) = (
+            ctx.f64("shore_width_m"),
+            ctx.f32("beach_height_m"),
+            ctx.f32("coastal_erosion"),
+        );
+        let shoreline = waterline_band(spec, &sea, shore_w);
+        let to_sea = distance_to(spec, &sea);
+        let shallow_depth = ctx.f32("shallow_depth_m");
+        let n = spec.len();
+        let (mut height, mut surface, mut sea_mask, mut shallow) =
+            (vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n], vec![0.0f32; n]);
+        height
+            .par_iter_mut()
+            .zip(surface.par_iter_mut())
+            .zip(sea_mask.par_iter_mut())
+            .zip(shallow.par_iter_mut())
+            .enumerate()
+            .for_each(|(i, (((hgt, surf), m), s))| {
+                let h = t.data[i];
+                if sea[i] {
+                    let depth = level - h;
+                    *hgt = h;
+                    *surf = level;
+                    *m = (depth / 0.1).min(1.0);
+                    *s = 1.0 - smoothstep(0.0, shallow_depth, depth);
+                } else {
+                    // Beaches: land just above the sea, near it, is worn
+                    // towards sea level (most at the waterline).
+                    let above = h - level;
+                    let near = 1.0 - smoothstep(0.0, shore_w.max(1.0e-3) as f32, to_sea.data[i]);
+                    let worn = if above > 0.0 && above < beach && beach > 0.0 {
+                        let fade = 1.0 - above / beach;
+                        level + above * (1.0 - erosion * near * fade)
+                    } else {
+                        h
+                    };
+                    *hgt = worn;
+                    *surf = worn;
+                }
+            });
+        Ok(Outputs::from([
+            ("height".into(), heightfield(Grid { spec, data: height })),
+            ("water_surface".into(), heightfield(Grid { spec, data: surface })),
+            ("sea".into(), mask(Grid { spec, data: sea_mask })),
+            ("shallow".into(), mask(Grid { spec, data: shallow })),
+            ("shoreline".into(), mask(shoreline)),
+        ]))
+    }
+}
+
+// ---- Snow -------------------------------------------------------------------
+
+/// Snow cover by altitude, slope and aspect, with melt.
+pub struct Snow {
+    schema: NodeSchema,
+}
+
+impl Default for Snow {
+    fn default() -> Self {
+        Self {
+            schema: NodeSchema {
+                type_id: "simulate.snow".into(),
+                type_version: 1,
+                label: "Snow".into(),
+                category: "Simulate".into(),
+                description:
+                    "Snow settles above the Snow line, lower on slopes facing away from the sun, and \
+                              slides off cliffs; Melt clears thin snow first. Outputs the snow-covered \
+                              Height and the Snow mask."
+                        .into(),
+                inputs: vec![PortDef::new("in", "Terrain", PortType::Heightfield)],
+                outputs: vec![
+                    PortDef::new("height", "Height", PortType::Heightfield),
+                    PortDef::new("snow", "Snow", PortType::Mask),
+                ],
+                params: vec![
+                    ParamDef::metres("snow_line_m", "Snow line", 1200.0, -10_000.0, 20_000.0)
+                        .describe("Height above which snow settles, in metres."),
+                    ParamDef::metres("transition_m", "Transition", 250.0, 0.0, 10_000.0)
+                        .describe("Height over which snow thins out around the snow line."),
+                    ParamDef::float("max_slope_deg", "Max slope", 45.0, 0.0, 90.0)
+                        .unit("°")
+                        .describe("Snow slides off ground steeper than this."),
+                    crate::common::angle_param(
+                        "shade_direction_deg",
+                        "Shaded side",
+                        270.0,
+                        "Direction the shaded slopes face (away from the sun). 270° is up in the 2D view.",
+                    ),
+                    ParamDef::metres("shade_m", "Shade effect", 250.0, 0.0, 10_000.0).describe(
+                        "How much lower the snow line is on slopes facing the shaded side (and higher on \
+                         sunny ones), in metres.",
+                    ),
+                    ParamDef::float("melt", "Melt", 0.2, 0.0, 1.0)
+                        .describe("Clears thin snow first. 1 melts everything."),
+                    ParamDef::metres("depth_m", "Depth", 2.0, 0.0, 100.0)
+                        .describe("Depth of full snow cover, added to the height, in metres."),
+                    ParamDef::metres("smoothing_m", "Smoothing", 20.0, 0.0, 1000.0)
+                        .describe("Softens the snow cover's edges over this distance, in metres."),
+                ],
+                gpu: false,
+            },
+        }
+    }
+}
+
+impl NodeKind for Snow {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let t = terrain(ctx)?;
+        let (gx, gy) = gradient(t);
+        let (fx, fy) = crate::common::direction(ctx.f64("shade_direction_deg"));
+        let (line, band) = (ctx.f32("snow_line_m"), ctx.f32("transition_m").max(1.0e-3));
+        let max_slope = ctx.f32("max_slope_deg");
+        let shade = ctx.f32("shade_m");
+        let melt = ctx.f32("melt");
+        let cover = t.map_indexed(|i, h| {
+            let (dx, dy) = (gx.data[i], gy.data[i]);
+            let steep = (dx * dx + dy * dy).sqrt();
+            let slope = libm::atanf(steep).to_degrees();
+            // +1 on slopes facing the shaded side, -1 facing the sun; flat
+            // ground counts as neither.
+            let facing = if steep > 0.0 {
+                (-(dx * fx as f32) - dy * fy as f32) / steep * smoothstep(0.0, 0.1, steep)
+            } else {
+                0.0
+            };
+            let altitude = smoothstep(line - 0.5 * band, line + 0.5 * band, h + shade * facing);
+            let settles = 1.0 - smoothstep(max_slope - 5.0, max_slope + 5.0, slope);
+            altitude * settles
+        });
+        let cover = match ctx.f64("smoothing_m") {
+            s if s > 0.0 => gaussian_blur(&cover, s),
+            _ => cover,
+        };
+        let snow = cover.map(|a| {
+            if melt >= 1.0 {
+                0.0
+            } else {
+                ((a - melt) / (1.0 - melt)).clamp(0.0, 1.0)
+            }
+        });
+        let depth = ctx.f32("depth_m");
+        let height = t.map_indexed(|i, h| h + depth * snow.data[i]);
+        Ok(Outputs::from([
+            ("height".into(), heightfield(height)),
+            ("snow".into(), mask(snow)),
         ]))
     }
 }

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use terrain_core::{EvalContext, Grid, GridSpec, NodeKind, Outputs, ParamValue, Value, World};
-use terrain_nodes::water::{Flow, Lakes, Rivers};
+use terrain_nodes::water::{Flow, Lakes, Rivers, Sea, Snow};
 
 fn world() -> World {
     World {
@@ -276,4 +276,88 @@ fn outputs_match_across_resolutions() {
             }
         }
     }
+}
+
+/// Land rising from y = 0 (sea level 200 m at y = 400 m), with an inland
+/// hollow below sea level and a cone reaching 2000 m.
+fn coast(res: u32) -> Grid {
+    Grid::from_fn(spec(res), |x, y| {
+        let hollow = 300.0 * libm::exp(-(((x - 800.0) / 60.0).powi(2) + ((y - 800.0) / 60.0).powi(2)));
+        let cone = (1800.0 - 5.0 * ((x - 300.0).powi(2) + (y - 750.0).powi(2)).sqrt()).max(0.0);
+        (y * 0.5 - hollow + cone) as f32
+    })
+}
+
+#[test]
+fn the_sea_floods_from_the_edges_and_wears_beaches() {
+    let g = coast(129);
+    let out = run(&Sea::default(), &g, &[]);
+    let (h, sea, shallow, shore, surface) = (
+        out["height"].grid(),
+        out["sea"].grid(),
+        out["shallow"].grid(),
+        out["shoreline"].grid(),
+        out["water_surface"].grid(),
+    );
+    // Offshore (y = 0..400 m) is sea at 200 m; inland (y ≈ 800 m) is dry,
+    // including the hollow below sea level.
+    assert_eq!(sea.get(100, 10), 1.0);
+    assert_eq!(surface.get(100, 10), 200.0);
+    assert_eq!(sea.get(100, 110), 0.0);
+    assert!(
+        g.get(100, 100) < 200.0 && sea.get(100, 100) == 0.0,
+        "inland hollow"
+    );
+    // Shallows are bright near the coast, dark in deep water.
+    assert!(shallow.get(100, 48) > shallow.get(100, 5));
+    // The shoreline follows the waterline (y = 400 m, row 50).
+    assert!(shore.get(100, 50) > 0.8 && shore.get(100, 100) == 0.0);
+    // Just above the water the ground is worn towards sea level; far inland
+    // and under water it's unchanged.
+    assert!(h.get(100, 52) < g.get(100, 52) && h.get(100, 52) > 200.0);
+    assert_eq!(h.get(100, 110), g.get(100, 110));
+    assert_eq!(h.get(100, 10), g.get(100, 10));
+    // Without the edge rule the inland hollow floods too.
+    let all = run(&Sea::default(), &g, &[("from_edges", ParamValue::Bool(false))]);
+    assert_eq!(all["sea"].grid().get(100, 100), 1.0);
+}
+
+#[test]
+fn snow_covers_high_shaded_slopes_first_and_adds_depth() {
+    // A 35° cone, 2000 m high at the centre.
+    let g = Grid::from_fn(spec(257), |x, y| {
+        (2000.0 - 0.7 * ((x - 512.0).powi(2) + (y - 512.0).powi(2)).sqrt()) as f32
+    });
+    let params = [
+        ("melt", ParamValue::Float(0.0)),
+        ("smoothing_m", ParamValue::Float(0.0)),
+        // The snow line at 300 m from the top.
+        ("snow_line_m", ParamValue::Float(1790.0)),
+    ];
+    let out = run(&Snow::default(), &g, &params);
+    let (h, snow) = (out["height"].grid(), out["snow"].grid());
+    let at = |x: f64, y: f64| snow.get((x / 4.0) as u32, (y / 4.0) as u32);
+    // At the snow line, the side facing -y (the shaded side, 270°) has snow,
+    // the sunny side facing +y none.
+    let (shaded, sunny) = (at(512.0, 212.0), at(512.0, 812.0));
+    assert!(shaded > 0.9 && sunny < 0.1, "shaded {shaded}, sunny {sunny}");
+    // Low ground has none; the top has snow and is raised by its depth.
+    assert_eq!(at(512.0, 1000.0), 0.0);
+    assert!(at(512.0, 480.0) > 0.9);
+    assert!(
+        h.data
+            .iter()
+            .zip(&g.data)
+            .zip(&snow.data)
+            .all(|((a, b), s)| (a - b - 2.0 * s).abs() < 1.0e-3)
+    );
+    // Too steep for snow: a 60° cone stays bare.
+    let steep = Grid::from_fn(spec(257), |x, y| {
+        (2000.0 - 1.8 * ((x - 512.0).powi(2) + (y - 512.0).powi(2)).sqrt()).max(0.0) as f32
+    });
+    let bare = run(&Snow::default(), &steep, &params);
+    assert!(bare["snow"].grid().get(128, 60) < 0.01);
+    // Full melt clears everything.
+    let melted = run(&Snow::default(), &g, &[("melt", ParamValue::Float(1.0))]);
+    assert!(melted["snow"].grid().data.iter().all(|v| *v == 0.0));
 }
