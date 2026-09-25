@@ -81,22 +81,28 @@ edits.
 | fBm → Warp → Blur → Slope, 1,024² | 41.3 ms | 41.4 ms |
 | fBm → Levels, 2,048² | 69.4 ms | 42.9 ms |
 | Thermal Erosion, 2,048², 60 s | 0.76 s | 1.10 s |
-| Hydraulic Erosion, 2,048², 1,000 kyr | 10.2 s (CPU solver) | 10.3 s |
+| Hydraulic Erosion, 2,048², 1,000 kyr | CPU solver | 4.4 s (8 workers) |
 
 On this machine the integrated GPU is about as fast as the 28-thread CPU. The kernels are memory-bound
 and simple, so a discrete GPU should be several times faster, but that hasn't been measured: no
 NVIDIA or AMD GPU was available.
 
-Hydraulic Erosion at 2,048², by phase (CPU, 40 steps): Priority-Flood routing 4.5 s, discharge 1.8 s,
-implicit incision 1.0 s, sediment transport 2.7 s, hillslope creep 0.4 s. All but the creep walk the
-drainage tree in order, which is why that node has no kernel yet.
+Hydraulic Erosion at 2,048², 1,000 kyr takes 4.4 s in the release benchmark (8 workers), down from
+10.2 s before the v0.4 CPU optimization. It remains entirely on the CPU. The optimization keeps
+Priority-Flood's exact `(filled height, cell index)` ordering while avoiding a heap operation for
+most unraised terrain cells: sort cells by original height and merge that sequence with a heap of
+raised pit/flat cells. It also hoists invariant per-cell jitter and per-link distance factors, and
+computes discharge powers once for both incision and sediment capacity. A routing unit test compares
+the filled surface and pop order with the original binary-heap algorithm on plateaus, pits and varied
+grid aspect ratios; EXR outputs at 1,024² and 2,048² are byte-identical to the pre-optimization
+baseline. Timing is machine- and load-dependent; the ~4.4 s run meets the 5 s target here, but with
+limited headroom on other hardware.
 
 ## Limits
 
-- **Hydraulic Erosion stays on the CPU.** Its routing (Priority-Flood with a priority queue) and the
-  passes along the drainage tree are sequential. A GPU solver needs different, parallel routing, and
-  would then carve rivers in slightly different places than the CPU solver, so it can't pass a per-cell
-  tolerance test. Undecided; see the v0.4 status in [ROADMAP.md](ROADMAP.md).
+- **Hydraulic Erosion stays on the CPU.** Its Priority-Flood routing and subsequent passes along the
+  drainage tree are sequential. The existing solver was optimized without changing outputs; a GPU
+  solver would need different, parallel routing and would carve rivers in slightly different places.
 - **Fractal noise precision.** Kernels compute lattice positions in f32. Each octave multiplies them
   by the lacunarity, so beyond about 8 octaves the finest octaves lose precision: a 12-octave Ridged
   differs by up to 160 ppm in 0.02% of samples. These nodes may exceed 100 ppm in up to 0.1% of

@@ -118,19 +118,50 @@ fn unit_hash(i: u64) -> f64 {
     (terrain_core::seed::mix64(i ^ 0x9e37_79b9_7f4a_7c15) >> 11) as f64 / (1u64 << 53) as f64
 }
 
+/// Kinds of link from a cell to its receiver, indexing [`Routing::lengths`]
+/// and the per-step tables built from them.
+const LINK_X: u8 = 0;
+const LINK_Y: u8 = 1;
+const LINK_DIAGONAL: u8 = 2;
+const LINK_OUTLET: u8 = 3;
+
 /// Flow routing for one surface.
 struct Routing {
     /// Downstream neighbour of each cell (itself for outlets).
     receiver: Vec<usize>,
-    /// Distance to the receiver, metres.
-    distance: Vec<f64>,
+    /// Kind of link to the receiver (`LINK_*`).
+    link: Vec<u8>,
+    /// Length of each kind of link, metres (1 for outlets).
+    lengths: [f64; 4],
     /// Cells ordered so every receiver comes before its donors.
     stack: Vec<usize>,
     /// Surface with pits filled (routing only).
     filled: Vec<f64>,
 }
 
-fn route(h: &[f64], w: usize, ht: usize, dx: f64, dy: f64) -> Routing {
+impl Routing {
+    /// Distance from cell `i` to its receiver, metres.
+    #[inline]
+    fn distance(&self, i: usize) -> f64 {
+        self.lengths[self.link[i] as usize]
+    }
+
+    /// `f(length)` for every kind of link, so per-cell work can look it up.
+    fn per_link(&self, f: impl Fn(f64) -> f64) -> [f64; 4] {
+        self.lengths.map(f)
+    }
+}
+
+/// The fixed random factor `0.25 + 1.5 × unit_hash(cell)` that makes ε
+/// routing wander across flats (the same for every step).
+fn flat_jitter(n: usize) -> Vec<f64> {
+    (0..n)
+        .into_par_iter()
+        .map(|j| 0.25 + 1.5 * unit_hash(j as u64))
+        .collect()
+}
+
+fn route(h: &[f64], jitter: &[f64], w: usize, ht: usize, dx: f64, dy: f64) -> Routing {
     let n = h.len();
     let is_edge = |i: usize| {
         let (x, y) = (i % w, i / w);
@@ -139,15 +170,43 @@ fn route(h: &[f64], w: usize, ht: usize, dx: f64, dy: f64) -> Routing {
     // Distances for D8 neighbours: x, x, y, y, then diagonals.
     let diag = (dx * dx + dy * dy).sqrt();
     let step = [dx, dx, dy, dy, diag, diag, diag, diag];
+    // Priority-Flood+ε pops cells in order of (filled height, index): every
+    // cell it pushes is above the one just popped, so that order only rises.
+    //
+    // Most cells end up unraised (filled = own height). Such a cell is always
+    // discovered before its turn (by a lower neighbour), so these cells pop
+    // exactly in order of (height, index): sort them once, in parallel, and
+    // walk that list. Only raised cells (pits and flats) go through a heap.
+    // A cell still undiscovered when its turn in the list comes will be
+    // raised, and joins the heap when discovered. Merging the two gives the
+    // same pop order as one heap of every cell.
+    let key = |height: f64, cell: usize| ((order_key(height) as u128) << 64) | cell as u128;
+    let mut by_height: Vec<u128> = (0..n).into_par_iter().map(|i| key(h[i], i)).collect();
+    by_height.par_sort_unstable();
     let mut filled = vec![f64::NAN; n];
     let mut stack = Vec::with_capacity(n);
-    let mut heap = BinaryHeap::with_capacity(4 * (w + ht));
+    let mut raised: BinaryHeap<Reverse<u128>> = BinaryHeap::new();
     for i in (0..n).filter(|&i| is_edge(i)) {
         filled[i] = h[i];
-        heap.push(Reverse((order_key(h[i]), i)));
     }
-    // Ties pop in index order, so the order is deterministic.
-    while let Some(Reverse((_, c))) = heap.pop() {
+    let mut next = 0;
+    loop {
+        let top = raised.peek().map(|r| r.0);
+        let c = match by_height.get(next) {
+            Some(&k) if top.is_none_or(|t| k < t) => {
+                next += 1;
+                let c = k as u64 as usize;
+                // Undiscovered (will be raised) or raised (in the heap): not now.
+                if filled[c] != h[c] {
+                    continue;
+                }
+                c
+            }
+            _ => match raised.pop() {
+                Some(Reverse(k)) => k as u64 as usize,
+                None => break,
+            },
+        };
         stack.push(c);
         let (cx, cy) = ((c % w) as i64, (c / w) as i64);
         for (k, (ox, oy)) in D8.iter().enumerate() {
@@ -161,25 +220,36 @@ fn route(h: &[f64], w: usize, ht: usize, dx: f64, dy: f64) -> Routing {
             }
             // Jittered ε: across flats and filled pits a plain ε makes flow
             // run in straight lines; a per-cell random factor lets it wander.
-            let jitter = 0.25 + 1.5 * unit_hash(j as u64);
-            filled[j] = h[j].max(filled[c] + EPSILON_SLOPE * step[k] * jitter);
-            heap.push(Reverse((order_key(filled[j]), j)));
+            filled[j] = h[j].max(filled[c] + EPSILON_SLOPE * step[k] * jitter[j]);
+            if filled[j] != h[j] {
+                raised.push(Reverse(key(filled[j], j)));
+            }
         }
     }
     // Steepest descent on the filled surface (always downhill, thanks to ε).
-    let (receiver, distance): (Vec<usize>, Vec<f64>) = (0..n)
+    let kind = [
+        LINK_X,
+        LINK_X,
+        LINK_Y,
+        LINK_Y,
+        LINK_DIAGONAL,
+        LINK_DIAGONAL,
+        LINK_DIAGONAL,
+        LINK_DIAGONAL,
+    ];
+    let (receiver, link): (Vec<usize>, Vec<u8>) = (0..n)
         .into_par_iter()
         .map(|i| {
             if is_edge(i) {
-                return (i, 1.0);
+                return (i, LINK_OUTLET);
             }
             let (cx, cy) = ((i % w) as i64, (i / w) as i64);
-            let mut best = (i, 1.0, 0.0);
+            let mut best = (i, LINK_OUTLET, 0.0);
             for (k, (ox, oy)) in D8.iter().enumerate() {
                 let j = (cy + oy) as usize * w + (cx + ox) as usize;
                 let s = (filled[i] - filled[j]) / step[k];
                 if s > best.2 {
-                    best = (j, step[k], s);
+                    best = (j, kind[k], s);
                 }
             }
             (best.0, best.1)
@@ -187,7 +257,8 @@ fn route(h: &[f64], w: usize, ht: usize, dx: f64, dy: f64) -> Routing {
         .unzip();
     Routing {
         receiver,
-        distance,
+        link,
+        lengths: [dx, dy, diag, 1.0],
         stack,
         filled,
     }
@@ -234,6 +305,7 @@ fn simulate(
     let kept_per_m = 1.0 - ctx.f64("evaporation") / 1000.0;
     let creep_sigma_m = (2.0 * ctx.f64("creep_m2_yr") * dt).sqrt();
     let weight: Vec<f64> = (0..n).map(|i| (strength[i] * softness[i]) as f64).collect();
+    let jitter = flat_jitter(n);
 
     let mut q = vec![0.0f64; n];
     let mut load = vec![0.0f64; n];
@@ -246,17 +318,23 @@ fn simulate(
     }
     for step in 0..steps {
         check_cancel(ctx)?;
-        let r = route(&h, w, ht, dx, dy);
+        let r = route(&h, &jitter, w, ht, dx, dy);
+        // Per-link factors: links have only four lengths.
+        let kept = r.per_link(|d| libm::pow(kept_per_m, d));
+        let unsettled = r.per_link(|d| libm::pow(unsettled_per_100m, d / 100.0));
 
         // Discharge, from the ridges down.
         q.par_iter_mut().for_each(|v| *v = rain * cell_area);
         for &i in r.stack.iter().rev() {
             let j = r.receiver[i];
             if j != i {
-                q[j] += q[i] * libm::pow(kept_per_m, r.distance[i]);
+                q[j] += q[i] * kept[r.link[i] as usize];
             }
         }
         check_cancel(ctx)?;
+
+        // Stream power's discharge term, computed once for both passes below.
+        let q_m: Vec<f64> = q.par_iter().map(|&v| libm::pow(v, M)).collect();
 
         // Implicit stream-power erosion, downstream first: each cell is solved
         // against its receiver's already-updated height.
@@ -266,7 +344,7 @@ fn simulate(
             if j == i || weight[i] == 0.0 || before[i] <= h[j] {
                 continue; // Outlet, protected, or in a pit (a lake).
             }
-            let f = k * weight[i] * dt * libm::pow(q[i], M) / r.distance[i];
+            let f = k * weight[i] * dt * q_m[i] / r.distance(i);
             h[i] = (before[i] + f * h[j]) / (1.0 + f);
         }
         check_cancel(ctx)?;
@@ -280,10 +358,10 @@ fn simulate(
             let carried = load[i] + eroded * cell_area;
             let mut settled = 0.0;
             if j != i && carried > 0.0 {
-                let slope = ((h[i] - h[j]) / r.distance[i]).max(0.0);
-                let capacity = capacity_factor * K_MAX * dt * libm::pow(q[i], M) * slope * cell_area;
+                let slope = ((h[i] - h[j]) / r.distance(i)).max(0.0);
+                let capacity = capacity_factor * K_MAX * dt * q_m[i] * slope * cell_area;
                 if carried > capacity {
-                    let share = 1.0 - libm::pow(unsettled_per_100m, r.distance[i] / 100.0);
+                    let share = 1.0 - unsettled[r.link[i] as usize];
                     // Fill lakes up to their spill level; elsewhere at most
                     // halve the drop to the next cell.
                     let lake = (r.filled[i] - h[i]).max(0.0);
