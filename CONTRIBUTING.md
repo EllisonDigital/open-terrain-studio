@@ -51,21 +51,37 @@ cargo build && godot --headless --path app --script res://tests/smoke_test.gd
 Nodes are plain Rust: one struct, one schema, one `evaluate` function. The inspector and graph editor are
 generated from the schema, so **no Godot code is needed**.
 
-1. Add the node to `crates/terrain-nodes/src/` (see `basic.rs` for small examples).
+1. Add the node to `crates/terrain-nodes/src/` in the module for its category (`primitives.rs`, `noise/`,
+   `terrain.rs`, `adjust.rs`, `data.rs`); `basic.rs` has small examples, `common.rs` shared parameters.
 2. Give it a permanent `type_id` like `noise.ridged`. Never rename it later: project files store it.
-3. Declare parameters with `ParamDef`. **All sizes are metres** (`ParamDef::metres`), never pixels.
+3. Declare parameters with `ParamDef`. **All sizes are metres** (`ParamDef::metres`), never pixels; directions
+   are degrees with 0° along +X and 90° along +Y.
 4. In `evaluate`, compute values from world positions (`Grid::from_fn` gives `x_m`, `y_m`), so the node
-   looks the same at every resolution. Use `ctx.seed` for randomness, never time or thread order.
-5. Register it in `terrain_nodes::registry()`.
-6. Add a test. The pipeline test already checks that every registered node evaluates without NaNs.
+   looks the same at every resolution. Use `ctx.seed` for randomness, never time or thread order. Shared
+   algorithms (blur, gradients, distance transforms) are in `terrain_core::ops`.
+5. If a float parameter could sensibly vary across the terrain, mark it `.drivable()` and read it with
+   `ctx.field("key").at(index)` instead of `ctx.f32("key")`. Users can then drive it with a mask.
+6. Register it in `terrain_nodes::registry()`.
+7. Run `cargo test`. Every registered node is checked automatically for finite output, determinism across
+   thread counts and resolution independence; add a tolerance in `tests/nodes.rs` only if the node uses
+   neighbouring samples. Then record its golden hash:
+   `OTS_BLESS=1 cargo test -p terrain-nodes --test nodes golden`.
+
+To see a node without starting the app, render it to a shaded PNG:
+
+```sh
+cargo run --release -p terrain-nodes --example render -- terrain.mountain mountain.png 1025
+```
 
 If you later change what a parameter means, bump `type_version` and implement `NodeKind::migrate` so old
-projects still open correctly.
+projects still open correctly. If you change a node's output on purpose, re-bless the golden hashes and say
+why in the merge request: it changes existing users' terrains.
 
 ## Ground rules
 
 - **Deterministic:** same project and seed must give byte-identical output on every machine. Avoid
-  platform maths like `f64::powf`/`sin` in node results (use `libm`), and hash-map iteration order.
+  platform maths like `f64::powf`/`powi`/`sin`/`exp` in node results (use `libm`), and hash-map iteration
+  order.
 - **Clean-room:** implement from published papers and public algorithm descriptions. Comparing results with
   Gaea visually is fine; decompiling it or copying its presets or assets is not.
 - **Small merge requests** with a clear description are reviewed fastest.
