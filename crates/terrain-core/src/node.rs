@@ -228,6 +228,8 @@ pub struct EvalContext<'a> {
     pub(crate) params: &'a BTreeMap<String, ParamValue>,
     pub(crate) inputs: BTreeMap<String, Value>,
     pub(crate) cancel: Option<&'a AtomicBool>,
+    /// Node-local progress, see [`EvalContext::report_progress`].
+    pub(crate) progress: Option<&'a (dyn Fn(f32) + Sync)>,
     /// Folder relative file paths are resolved against (the project's folder).
     pub base_dir: Option<&'a Path>,
 }
@@ -252,7 +254,29 @@ impl<'a> EvalContext<'a> {
             params,
             inputs,
             cancel: None,
+            progress: None,
             base_dir: None,
+        }
+    }
+
+    /// Attach controls for direct evaluations (tests, tools and long simulations).
+    pub fn with_controls(
+        mut self,
+        cancel: Option<&'a AtomicBool>,
+        progress: Option<&'a (dyn Fn(f32) + Sync)>,
+    ) -> Self {
+        self.cancel = cancel;
+        self.progress = progress;
+        self
+    }
+
+    /// Report node-local progress 0..1. Call monotonically from the
+    /// coordinating thread; the evaluator maps it to overall progress.
+    pub fn report_progress(&self, fraction: f32) {
+        if fraction.is_finite()
+            && let Some(progress) = self.progress
+        {
+            progress(fraction.clamp(0.0, 1.0));
         }
     }
 
