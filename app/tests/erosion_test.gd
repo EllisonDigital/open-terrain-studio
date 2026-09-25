@@ -49,7 +49,7 @@ func run() -> void:
 			if port != "height":
 				check(preview.get_port_type() == "mask" and preview.get_min() >= 0.0 and preview.get_max() <= 1.0, "normalised mask " + port)
 	# A long-running preview reports progress inside hydraulic, then is cancelled.
-	graph.set_param(hydraulic, "duration_s", 600.0)
+	graph.set_param(hydraulic, "duration_kyr", 5000.0)
 	var simulation_progress := [false]
 	builder.progress.connect(func(_generation, fraction):
 		# There are three dependencies: source, hardness, hydraulic.
@@ -66,7 +66,7 @@ func run() -> void:
 	await create_timer(0.1).timeout
 	check(not stale_delivered[0], "cancelled result is discarded")
 	# The same request again runs to completion: nothing partial was cached.
-	graph.set_param(hydraulic, "duration_s", 20.0)
+	graph.set_param(hydraulic, "duration_kyr", 100.0)
 	builder.request_preview(project, hydraulic, "height", 256)
 	var finished: TerrainPreview = await builder.preview_ready
 	check(finished.get_computed_nodes() >= 1, "re-requested simulation completed (%d nodes computed)" % finished.get_computed_nodes())

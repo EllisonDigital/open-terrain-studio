@@ -156,6 +156,8 @@ pub trait NodeKind: Send + Sync {
 
 `NodeSchema` lists typed input ports, typed output ports and parameters (type, default, range, unit, UI hint). The Godot inspector and graph editor are generated from the schema, so adding a node needs no UI code.
 
+> **Added 25 Sep 2026 (v0.3 integration):** a simulation whose features are about one cell wide (rivers) can't match across resolutions cell for cell. Hydraulic Erosion therefore simulates on a fixed grid set in metres (its *Detail size*) and adds the resampled change to the full-resolution input. This is rule 4 of section 4 applied to simulations: the same grid in metres at every output resolution.
+
 > **Added 25 Sep 2026 (v0.3 integration):** long nodes report their own progress with `EvalContext::report_progress(0..1)`, which the evaluator maps into overall progress, and check `is_cancelled()` between passes. If a node returns after cancellation its result is discarded and never cached.
 
 **Ports and types.** Ports are typed (`Heightfield`, `Mask`, `ColorMap`, `PointSet`, `Scalar`…). The editor only allows compatible connections; a few automatic conversions exist (e.g. `Heightfield` → `Mask` by normalising to the height range).

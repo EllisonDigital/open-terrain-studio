@@ -47,13 +47,6 @@ fn run(
     ))
     .unwrap()
 }
-fn raw_mask(v: &Value, scale: f64) -> Vec<f64> {
-    v.grid()
-        .data
-        .iter()
-        .map(|v| scale * *v as f64 / (1.0 - *v as f64))
-        .collect()
-}
 
 #[test]
 fn deterministic_across_thread_counts_all_outputs() {
@@ -89,7 +82,7 @@ fn zero_duration_flat_ground_and_zero_strength_are_identity() {
     let flat = Grid::filled(shaped.spec, 123.0);
     for node in [&Hydraulic::default() as &dyn NodeKind, &Thermal::default()] {
         for (g, params, mask) in [
-            (&shaped, vec![("duration_s", 0.0)], None),
+            (&shaped, vec![("duration_s", 0.0), ("duration_kyr", 0.0)], None),
             (&shaped, vec![], Some(Grid::filled(shaped.spec, 0.0))),
             (&flat, vec![], None),
         ] {
@@ -132,9 +125,15 @@ fn local_mask_protects_cells_and_hardness_reduces_wear() {
     );
     assert!(hard["wear"].grid().mean() < soft["wear"].grid().mean());
 }
+/// Slopes are worn down and, where the river can't carry everything (a
+/// gentle valley floor), the sediment settles there; all masks stay in 0..1.
 #[test]
-fn hydraulic_transports_and_conserves_terrain_plus_sediment() {
-    let g = terrain(65);
+fn hydraulic_wears_slopes_and_fills_a_gentle_valley_floor() {
+    // A V-shaped valley along y, draining towards the y = 0 edge, with bumps.
+    let spec = GridSpec::full_world(&world(), 129).unwrap();
+    let g = Grid::from_fn(spec, |x, y| {
+        (200.0 + (x - 512.0).abs() * 0.3 + y * 0.1 + 6.0 * libm::sin(x / 37.0) * libm::cos(y / 29.0)) as f32
+    });
     let out = run(&Hydraulic::default(), &g, &[], None, None);
     for port in ["flow", "wear", "deposition", "sediment"] {
         let values = &out[port].grid().data;
@@ -144,19 +143,16 @@ fn hydraulic_transports_and_conserves_terrain_plus_sediment() {
         );
         assert!(values.iter().any(|v| *v > 0.001), "{port} has no signal");
     }
-    let sediment = raw_mask(&out["sediment"], 1.0);
-    let total_before: f64 = g.data.iter().map(|v| *v as f64).sum();
-    let total_after: f64 = out["height"]
-        .grid()
-        .data
-        .iter()
-        .zip(sediment)
-        .map(|(h, s)| *h as f64 + s)
-        .sum();
+    let h = out["height"].grid();
+    let lowered = |i: u32, j: u32| g.get(i, j) - h.get(i, j);
+    let flank = (40..90).map(|j| lowered(24, j)).sum::<f32>() / 50.0;
+    assert!(flank > 1.0, "flank lowered by {flank} m on average");
+    let dep = out["deposition"].grid();
+    let floor_dep = (40..90).map(|j| dep.get(64, j)).sum::<f32>();
+    let flank_dep = (40..90).map(|j| dep.get(24, j)).sum::<f32>();
     assert!(
-        (total_after - total_before).abs() / (g.data.len() as f64) < 0.002,
-        "mass drift {} m/cell",
-        (total_after - total_before) / g.data.len() as f64
+        floor_dep > flank_dep,
+        "deposition floor {floor_dep}, flank {flank_dep}"
     );
 }
 #[test]
@@ -354,19 +350,17 @@ fn shipped_erosion_project_loads_and_its_marked_outputs_exist() {
     assert!(out["height"].grid().data.iter().all(|v| v.is_finite()));
 }
 
-/// Flow shows runoff: dark where water divides (crests), bright where it has
-/// gathered from upslope, and never saturated.
+/// Flow is the area draining through each cell: dark on crests, bright in
+/// the channel where the whole valley gathers, never saturated.
 #[test]
-fn flow_is_dark_on_crests_and_bright_on_flanks() {
-    // A ridge along y at x = 512 m.
+fn flow_is_dark_on_crests_and_bright_in_channels() {
     let spec = GridSpec::full_world(&world(), 129).unwrap();
-    let g = Grid::from_fn(spec, |x, y| (400.0 - (x - 512.0).abs() * 0.4 + y * 0.05) as f32);
+    let g = Grid::from_fn(spec, |x, y| (200.0 + (x - 512.0).abs() * 0.3 + y * 0.1) as f32);
     let out = run(&Hydraulic::default(), &g, &[], None, None);
     let flow = out["flow"].grid();
-    let (crest, flank) = (flow.get(64, 64), flow.get(24, 64));
-    assert!(
-        flank > crest + 0.2,
-        "flank {flank} should be much brighter than the crest {crest}"
-    );
+    let channel = (0..129).map(|i| flow.get(i, 16)).fold(0.0f32, f32::max);
+    let (crest_l, crest_r) = (flow.get(2, 64), flow.get(126, 64));
+    assert!(channel > 0.25, "channel {channel}");
+    assert!(crest_l < 0.1 && crest_r < 0.1, "crests {crest_l} {crest_r}");
     assert!(flow.data.iter().all(|&v| v < 0.95), "flow saturated");
 }

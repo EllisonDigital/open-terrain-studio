@@ -35,9 +35,7 @@
         640,
         40
       ],
-      "params": {
-        "duration_s": 60.0
-      }
+      "params": {}
     },
     {
       "id": "n_0003",
@@ -48,7 +46,7 @@
         40
       ],
       "params": {
-        "duration_s": 60.0
+        "duration_s": 20.0
       }
     },
     {

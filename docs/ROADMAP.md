@@ -101,6 +101,8 @@ Differences from the plan:
 - *Exit criterion, Unreal masks:* PNG/EXR mask values round-trip exactly, but nothing has been imported into Unreal.
 - **Not met: the goal, natural-looking erosion.** On the alpine example, hydraulic erosion planes slopes smooth and fills valleys instead of cutting branching channels, at every setting tried (rain 0.002–0.05 m/s, 60–600 s, capacity 2–8, deposition 0.1–0.5), with some grid-aligned artefacts along crests. Uniform rain over a grid water sheet makes erosion act like diffusion. Thermal erosion behaves as intended but its defaults remove hundreds of metres from steep peaks in 60 s. The solver needs erosion that concentrates with drained area before v0.3 can be called done.
 
+**Update (25 Sep 2026, later):** Hydraulic Erosion now uses a stream-power landscape-evolution model (drainage-area routing, implicit incision, sediment transport and hillslope creep; see `docs/erosion.md`). On the alpine example it cuts branching V-shaped valleys between sharp ridges and fills basins with sediment. Flow is a river network and Deposition marks valley fills, so the "natural-looking" goal is met by eye; there is still no artist review or reference-photo comparison. It simulates on a fixed 8 m grid, so previews and builds get the same rivers. 1,024² over the default 8 km world takes 10.3 s (still under 30 s). Still open for the milestone: comparing on a second machine or OS, and importing the masks into Unreal.
+
 **Goal:** natural-looking eroded terrain, the core of the Gaea look, on the CPU.
 
 **Deliverables**

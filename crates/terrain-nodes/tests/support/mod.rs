@@ -48,10 +48,12 @@ pub fn project_for(reg: &NodeRegistry, type_id: &str, files: &Path) -> (Project,
     }
     // Simulations: a short run keeps the all-node checks fast; tests/erosion*.rs
     // cover full-length erosion.
-    if schema.param("duration_s").is_some() {
-        p.graph
-            .set_param(reg, &id, "duration_s", ParamValue::Float(6.0))
-            .unwrap();
+    for (key, value) in [("duration_s", 6.0), ("duration_kyr", 100.0), ("detail_m", 32.0)] {
+        if schema.param(key).is_some() {
+            p.graph
+                .set_param(reg, &id, key, ParamValue::Float(value))
+                .unwrap();
+        }
     }
     if type_id == "primitive.file" {
         let png = test_png(files);
