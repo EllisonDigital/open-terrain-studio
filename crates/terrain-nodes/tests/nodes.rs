@@ -97,7 +97,7 @@ fn every_node_is_resolution_independent() {
 
 /// Golden hashes of every node's default outputs at 65². Regenerate after a
 /// deliberate change with `OTS_BLESS=1 cargo test -p terrain-nodes --test nodes golden`
-/// and explain the change in the merge request: it changes users' terrains.
+/// and explain the change in the pull request: it changes users' terrains.
 #[test]
 fn golden_hashes() {
     let reg = registry();

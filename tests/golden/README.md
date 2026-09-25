@@ -7,7 +7,7 @@ stored here. `cargo test` fails if any node's output changes, since that would
 change the terrain in every existing project that uses it.
 
 After a deliberate change, regenerate the file and explain the change in the
-merge request:
+pull request:
 
 ```sh
 OTS_BLESS=1 cargo test -p terrain-nodes --test nodes golden
