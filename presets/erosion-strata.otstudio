@@ -1,0 +1,151 @@
+{
+  "format_version": 1,
+  "app_version": "0.1.0",
+  "world": {
+    "size_m": [
+      4096.0,
+      4096.0
+    ],
+    "height_range_m": [
+      0.0,
+      2000.0
+    ],
+    "seed": 12345
+  },
+  "next_node_id": 5,
+  "nodes": [
+    {
+      "id": "n_0001",
+      "type": "noise.fbm",
+      "type_version": 1,
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "feature_size_m": 700.0,
+        "height_m": 800.0
+      }
+    },
+    {
+      "id": "n_0002",
+      "type": "simulate.hydraulic",
+      "type_version": 1,
+      "pos": [
+        640,
+        40
+      ],
+      "params": {
+        "duration_s": 60.0
+      }
+    },
+    {
+      "id": "n_0003",
+      "type": "simulate.thermal",
+      "type_version": 1,
+      "pos": [
+        960,
+        40
+      ],
+      "params": {
+        "duration_s": 60.0
+      }
+    },
+    {
+      "id": "n_4",
+      "type": "data.rock_hardness",
+      "type_version": 1,
+      "pos": [
+        320,
+        260
+      ],
+      "params": {
+        "layer_thickness_m": 50.0,
+        "offset_m": 0.0,
+        "soft_hardness": 0.1,
+        "hard_hardness": 0.9
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": [
+        "n_0001",
+        "out"
+      ],
+      "to": [
+        "n_4",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0001",
+        "out"
+      ],
+      "to": [
+        "n_0002",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_4",
+        "out"
+      ],
+      "to": [
+        "n_0002",
+        "hardness"
+      ]
+    },
+    {
+      "from": [
+        "n_0002",
+        "height"
+      ],
+      "to": [
+        "n_0003",
+        "in"
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "node": "n_0002",
+      "port": "flow",
+      "format": "png16"
+    },
+    {
+      "node": "n_0002",
+      "port": "wear",
+      "format": "png16"
+    },
+    {
+      "node": "n_0002",
+      "port": "deposition",
+      "format": "png16"
+    },
+    {
+      "node": "n_0002",
+      "port": "sediment",
+      "format": "png16"
+    },
+    {
+      "node": "n_0003",
+      "port": "height",
+      "format": "exr32"
+    },
+    {
+      "node": "n_0003",
+      "port": "debris",
+      "format": "png16"
+    }
+  ],
+  "build": {
+    "resolution": 1024,
+    "folder": "output/erosion"
+  },
+  "ui": {
+    "viewed_node": "n_0003"
+  }
+}

@@ -14,6 +14,7 @@ pub mod adjust;
 pub mod basic;
 pub mod common;
 pub mod data;
+pub mod erosion;
 pub mod noise;
 pub mod primitives;
 pub mod terrain;
@@ -65,5 +66,9 @@ pub fn registry() -> NodeRegistry {
     r.register(data::Aspect::default());
     r.register(data::SelectRange::default());
     r.register(data::Distance::default());
+    r.register(erosion::RockHardness::default());
+    // Simulate
+    r.register(erosion::Hydraulic::default());
+    r.register(erosion::Thermal::default());
     r
 }
