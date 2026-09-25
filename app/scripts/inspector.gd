@@ -3,6 +3,7 @@
 extends ScrollContainer
 
 const CurveEditor := preload("res://scripts/curve_editor.gd")
+const GradientEditor := preload("res://scripts/gradient_editor.gd")
 
 signal param_changed(node_id: String, key: String, value: Variant)
 signal port_toggled(node_id: String, key: String, exposed: bool)
@@ -12,6 +13,7 @@ signal world_changed
 const EXPORT_FORMATS := [
 	["exr32", "EXR 32-bit (metres)"],
 	["png16", "PNG 16-bit"],
+	["png8", "PNG 8-bit"],
 ]
 
 var project: TerrainProject
@@ -228,6 +230,11 @@ func _add_param(p: Dictionary, value: Variant, exposed: bool) -> void:
 			ce.set_points(pts)
 			ce.changed.connect(func(points): param_changed.emit(id, key, points))
 			control = ce
+		"gradient":
+			var ge := GradientEditor.new()
+			ge.set_stops(value)
+			ge.changed.connect(func(stops): param_changed.emit(id, key, stops))
+			control = ge
 		"file":
 			control = _file_control(value, p.get("filters", []), func(path): param_changed.emit(id, key, path))
 		_:

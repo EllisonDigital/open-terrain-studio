@@ -14,8 +14,10 @@ var project: TerrainProject         ## for grouping multi-node edits into one un
 const PORT_COLORS := {
 	"heightfield": Color(0.95, 0.72, 0.30),
 	"mask": Color(0.55, 0.75, 0.95),
+	"color_map": Color(0.92, 0.45, 0.75),
 }
-const PORT_SLOT_TYPES := {"heightfield": 0, "mask": 1}
+## Colour maps (slot type 2) only connect to colour inputs.
+const PORT_SLOT_TYPES := {"heightfield": 0, "mask": 1, "color_map": 2}
 ## Parameter ports (masks driving a value) get their own colour.
 const PARAM_PORT_COLOR := Color(0.55, 0.9, 0.6)
 const EXPORT_BADGE_COLOR := Color(0.55, 0.9, 0.6)
@@ -236,7 +238,7 @@ func _build_add_menu() -> void:
 	var by_category := {}
 	for t in graph.get_node_types():
 		by_category.get_or_add(t["category"], []).append(t)
-	var order := ["Primitives", "Noise", "Terrain", "Adjust", "Combine", "Data", "Simulate", "Output"]
+	var order := ["Primitives", "Noise", "Terrain", "Adjust", "Combine", "Data", "Simulate", "Colour", "Output"]
 	var categories: Array = by_category.keys()
 	categories.sort_custom(func(a, b):
 		var ia := order.find(a)

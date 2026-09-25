@@ -26,6 +26,7 @@ var _water: MeshInstance3D
 var _water_material: ShaderMaterial
 var _water_texture: ImageTexture
 var _snow_texture: ImageTexture
+var _color_texture: ImageTexture
 var _mesh_res := 0
 var _exaggeration := 1.0
 
@@ -124,17 +125,25 @@ func set_world(size_m: float, h_min: float, h_max: float) -> void:
 ## Show a TerrainPreview. Heightfields are shown as terrain. Masks are drawn
 ## as a false-colour overlay on the terrain they were computed from; a mask
 ## with no terrain upstream is shown as relief over the world height range.
+## Colour maps are painted on the terrain they were computed from (flat
+## ground if there is none).
 func show_preview(preview: TerrainPreview) -> void:
 	var img: Image = preview.get_image()
 	if img == null:
 		return
-	var is_mask := preview.get_port_type() == "mask"
-	var base: Image = preview.get_base_image() if is_mask else null
+	var type := preview.get_port_type()
+	var is_mask := type == "mask"
+	var is_color := type == "color_map"
+	var is_height := not is_mask and not is_color
+	var base: Image = null if is_height else preview.get_base_image()
 	var height_img: Image = base if base != null else img
+	if is_color and base == null:
+		height_img = Image.create(img.get_width(), img.get_height(), false, Image.FORMAT_RF)
 	_texture = _update_texture(_texture, height_img)
 	_material.set_shader_parameter("height_tex", _texture)
-	if is_mask and base == null:
-		_material.set_shader_parameter("value_scale", height_max - height_min)
+	if not is_height and base == null:
+		# A mask as relief over the height range; a colour map flat at the bottom.
+		_material.set_shader_parameter("value_scale", 0.0 if is_color else height_max - height_min)
 		_material.set_shader_parameter("value_offset", height_min)
 	else:
 		_material.set_shader_parameter("value_scale", 1.0)
@@ -143,12 +152,16 @@ func show_preview(preview: TerrainPreview) -> void:
 	if is_mask:
 		_overlay = _update_texture(_overlay, img)
 		_material.set_shader_parameter("overlay_tex", _overlay)
+	_material.set_shader_parameter("show_color", is_color)
+	if is_color:
+		_color_texture = _update_texture(_color_texture, img)
+		_material.set_shader_parameter("color_tex", _color_texture)
 	var res := mini(img.get_width(), MAX_MESH_RES)
 	if res != _mesh_res:
 		_build_mesh(res)
 	_terrain.visible = true
-	_show_water(null if is_mask else preview.get_water_image())
-	_show_snow(null if is_mask else preview.get_snow_image())
+	_show_water(preview.get_water_image() if is_height else null)
+	_show_snow(preview.get_snow_image() if is_height else null)
 
 
 ## Snow cover from Snow nodes on the terrain shown (null: none).
@@ -171,7 +184,7 @@ func _show_water(level: Image) -> void:
 
 
 func _update_texture(tex: ImageTexture, img: Image) -> ImageTexture:
-	if tex != null and tex.get_width() == img.get_width():
+	if tex != null and tex.get_width() == img.get_width() and tex.get_format() == img.get_format():
 		tex.update(img)
 		return tex
 	return ImageTexture.create_from_image(img)

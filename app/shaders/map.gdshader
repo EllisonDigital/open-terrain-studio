@@ -1,5 +1,5 @@
 // 2D map view (ARCHITECTURE.md §7): the raw map, hillshaded and coloured for
-// heightfields, greyscale for masks.
+// heightfields, greyscale for masks, as painted for colour maps.
 shader_type canvas_item;
 
 uniform sampler2D map_tex : filter_nearest, repeat_disable;
@@ -7,6 +7,8 @@ uniform sampler2D map_tex : filter_nearest, repeat_disable;
 uniform float value_min = 0.0;
 uniform float value_max = 1.0;
 uniform bool is_mask = false;
+// Colour maps: sRGB colours, shown as they are.
+uniform bool is_color = false;
 // Metres per texel, for the hillshade slope.
 uniform float cell_m = 8.0;
 // 0 = natural, 1 = clay (grey), 2 = height colours (same as the 3D view).
@@ -21,7 +23,9 @@ vec3 height_ramp(float t) {
 
 void fragment() {
 	float v = texture(map_tex, UV).r;
-	if (is_mask) {
+	if (is_color) {
+		COLOR = vec4(clamp(texture(map_tex, UV).rgb, 0.0, 1.0), 1.0);
+	} else if (is_mask) {
 		COLOR = vec4(vec3(clamp(v, 0.0, 1.0)), 1.0);
 	} else {
 		vec2 texel = 1.0 / vec2(textureSize(map_tex, 0));

@@ -10,7 +10,7 @@ signal builds_on_gpu_toggled(on: bool)
 
 const RESOLUTIONS := [512, 1009, 1024, 2017, 2048, 4033, 4096, 8129, 8192]
 const UNREAL_SIZES := [1009, 2017, 4033, 8129]
-const FORMATS := [["exr32", "EXR"], ["png16", "PNG 16"]]
+const FORMATS := [["exr32", "EXR"], ["png16", "PNG 16"], ["png8", "PNG 8"]]
 
 var project: TerrainProject
 ## Compute builds on the GPU (a machine setting, owned by the main window).

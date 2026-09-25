@@ -747,7 +747,11 @@ func _on_preview_ready(preview: TerrainPreview) -> void:
 	else:
 		view.show_preview(preview)
 	var span_text := "%.0f – %.0f m" % [preview.get_min(), preview.get_max()]
-	if preview.get_port_type() == "mask":
+	if preview.get_port_type() == "color_map":
+		span_text = "colour"
+		if preview.get_base_node_id() != "":
+			span_text += " on %s" % preview.get_base_node_id()
+	elif preview.get_port_type() == "mask":
 		span_text = "mask %.2f – %.2f" % [preview.get_min(), preview.get_max()]
 		if preview.get_base_node_id() != "":
 			span_text += " on %s" % preview.get_base_node_id()
@@ -858,8 +862,11 @@ func _on_menu(id: int) -> void:
 			var port := _viewed_port()
 			var marked := not project.get_export_formats(viewed_id, port).is_empty()
 			project.begin_edit_group("Unmark for export" if marked else "Mark for export")
-			for f in ["exr32", "png16"]:
-				project.set_export(viewed_id, port, f, not marked)
+			# Colour maps are marked as 8-bit PNG (what engines load), the rest as EXR + 16-bit PNG.
+			var is_color := _last_preview != null and _last_preview.get_port_type() == "color_map"
+			var mark_formats := ["png8"] if is_color else ["exr32", "png16"]
+			for f in ["exr32", "png16", "png8"]:
+				project.set_export(viewed_id, port, f, not marked and f in mark_formats)
 			project.end_edit_group()
 			_on_export_toggled(viewed_id, port, "exr32", not marked)
 			_set_status("%s %s for export." % ["Unmarked" if marked else "Marked", viewed_id])
