@@ -14,7 +14,7 @@ const BuildPanel := preload("res://scripts/build_panel.gd")
 const PREVIEW_RESOLUTIONS := [256, 512, 1024, 2048]
 const EXPORT_RESOLUTIONS := [512, 1009, 1024, 2017, 2048, 4033, 4096, 8129, 8192]
 const SETTINGS_PATH := "user://settings.cfg"
-const REPO_URL := "https://gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio"
+const REPO_URL := "https://github.com/EllisonDigital/open-terrain-studio"
 ## Example projects bundled with the app, built only from built-in nodes.
 const EXAMPLES := [
 	["Alpine range", "res://examples/alpine_range.otstudio"],

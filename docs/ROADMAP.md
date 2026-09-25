@@ -25,7 +25,7 @@ Erosion comes early (v0.3) because it is what makes terrain look like Gaea outpu
 
 ### v0.1 — Foundation
 
-**Status (24 Sep 2026):** complete in the repository; release pending. All deliverables are built and tested, including packaged apps: export presets for Windows, Linux and macOS (universal), `scripts/package.sh` / `package.ps1`, the Godot version pinned in `.godot-version`, and a CI pipeline that publishes a GitLab Release on `v*` tags. Still to do on GitLab: protect `main`, create the milestones and labels, and push the `v0.1.0` tag. The release pipeline hasn't run on GitLab yet.
+**Status:** complete in the repository; release pending. All deliverables are built and tested, including packaged apps: export presets for Windows, Linux and macOS (universal), `scripts/package.sh` / `package.ps1`, the Godot version pinned in `.godot-version`, and a GitHub Actions workflow that publishes a GitHub Release on version tags. Still to do on GitHub: protect `main`, create the milestones and labels, and push a release tag. The release workflow has not been verified on a version tag yet.
 
 Exit criteria, as checked:
 
@@ -123,7 +123,7 @@ Differences from the plan:
 **Status (25 Sep 2026):** in progress on the `v0.4-gpu` branch. Not merged or released. Details and measurements are in [gpu.md](gpu.md).
 
 - *Done and tested:* GPU compute through a local RenderingDevice on its own thread; GPU-resident results that the next GPU node reads without a round trip; kernels for every noise node, Blur, Sharpen, Transform, Warp, Slope, Aspect (not in the plan, same kernel as Slope), Curvature and Thermal Erosion; batched submissions for long simulations, with progress and cancellation between batches; CPU fallback on any GPU error; Force CPU; automatic CPU-only mode without a device (Compatibility renderer, headless); GPU/CPU badge on each node; auto-update or manual update (F5). Preview quality already offered 256–2,048².
-- *Tolerance tests:* `app/tests/gpu_test.gd` compares 36 node cases with the CPU. All are within 100 ppm (0.01%) of the value range on Intel UHD (Mesa) and Mesa llvmpipe, on Godot 4.7.2 and 4.6.2. CI runs it on llvmpipe (`godot-gpu` job; not yet run on GitLab).
+- *Tolerance tests:* `app/tests/gpu_test.gd` compares 36 node cases with the CPU. All are within 100 ppm (0.01%) of the value range on Intel UHD (Mesa) and Mesa llvmpipe, on Godot 4.7.2 and 4.6.2. GitHub Actions runs it on llvmpipe (`godot-gpu` job).
 - *Builds stay on the CPU by default*, so exports remain bit-identical on every machine; the Build tab can switch them to the GPU, and `build.json` records which was used.
 - *Exit criterion, 10+ fps slider at 1,024²:* met on the development laptop: 36 fps on its integrated GPU, 48 fps with Force CPU (fBm → Levels, request to finished preview).
 - *Exit criterion, 2,048² erosion under 5 s:* met on the development laptop. Thermal Erosion takes 0.76 s on the integrated GPU; the existing CPU Hydraulic Erosion solver now takes 4.4 s on 8 workers (was 10.2 s), with bit-identical outputs. Hydraulic remains CPU-only; no parallel GPU routing was introduced.
@@ -261,7 +261,7 @@ All colour work lives in the dedicated **Colour** tab (ARCHITECTURE.md §5). Ter
 
 - Name: **OpenTerrainStudio** (written "Open Terrain Studio" in prose), project extension `.otstudio`.
 - Owner: EllisonDigital, which holds the copyright and the "OpenTerrainStudio" trademark.
-- Hosting: moved to GitHub at `EllisonDigital/open-terrain-studio`; issues, pull requests and releases live there. The earlier GitLab subgroup plan is superseded.
+- Hosting: GitHub at `EllisonDigital/open-terrain-studio`; issues, pull requests and releases live there.
 - Crates: internal workspace crates are `terrain-core`, `terrain-nodes` and `terrain-godot` (not published). Any crate published to crates.io uses the `openterrainstudio-` prefix (`ots-core` is already taken).
 - Licence: dual MIT / Apache-2.0.
 - Contributions: Developer Certificate of Origin (DCO) sign-off, no CLA.
