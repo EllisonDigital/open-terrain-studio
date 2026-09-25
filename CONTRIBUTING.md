@@ -1,7 +1,7 @@
 # Contributing to OpenTerrainStudio
 
-Thanks for helping. OpenTerrainStudio is developed by EllisonDigital and the community on GitLab:
-`gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio`
+Thanks for helping. OpenTerrainStudio is developed by EllisonDigital and the community on GitHub:
+`github.com/EllisonDigital/open-terrain-studio`
 
 Before a larger change, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and check the milestone in
 [docs/ROADMAP.md](docs/ROADMAP.md). Opening an issue first avoids duplicated work.
@@ -35,7 +35,7 @@ godot --path app                 # runs the app (or open app/project.godot in th
 The extension is loaded from `target/debug`, so after changing Rust code just run `cargo build` again and
 restart the app.
 
-## Before you open a merge request
+## Before you open a pull request
 
 CI runs all of these; running them locally saves a round trip.
 
@@ -82,7 +82,7 @@ cargo build && godot --path app --rendering-driver vulkan --script res://tests/g
 
 If you later change what a parameter means, bump `type_version` and implement `NodeKind::migrate` so old
 projects still open correctly. If you change a node's output on purpose, re-bless the golden hashes and say
-why in the merge request: it changes existing users' terrains.
+why in the pull request: it changes existing users' terrains.
 
 ## Ground rules
 
@@ -91,7 +91,7 @@ why in the merge request: it changes existing users' terrains.
   order.
 - **Clean-room:** implement from published papers and public algorithm descriptions. Comparing results with
   Gaea visually is fine; decompiling it or copying its presets or assets is not.
-- **Small merge requests** with a clear description are reviewed fastest.
+- **Small pull requests** with a clear description are reviewed fastest.
 
 ## Reporting bugs
 

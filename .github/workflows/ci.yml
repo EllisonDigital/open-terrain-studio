@@ -1,0 +1,230 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v[0-9]*']
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  GODOT_MIN_VERSION: '4.6.2'
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check sign-off on pull request commits
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --quiet origin "refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          missing=0
+          for c in $(git rev-list "origin/$BASE_REF..$HEAD_SHA"); do
+            if ! git log -1 --format=%B "$c" | grep -q '^Signed-off-by: '; then
+              echo "Commit $c has no Signed-off-by line (use git commit -s)"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  godot-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        godot: [pinned, minimum]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: .godot-cache
+          key: godot-editor-${{ matrix.godot }}-${{ hashFiles('.godot-version') }}
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq unzip
+      - name: Run headless extension tests
+        run: |
+          if [ '${{ matrix.godot }}' = minimum ]; then
+            GODOT="$(scripts/fetch-godot.sh "$GODOT_MIN_VERSION")"
+          else
+            GODOT="$(scripts/fetch-godot.sh)"
+          fi
+          cargo build -p terrain-godot
+          # First import can crash on exit after completing; subsequent tests must pass.
+          "$GODOT" --headless --path app --import || true
+          "$GODOT" --headless --path app --script res://tests/smoke_test.gd
+          "$GODOT" --headless --path app --script res://tests/erosion_test.gd
+
+  godot-gpu:
+    runs-on: ubuntu-latest
+    env:
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: .godot-cache
+          key: godot-editor-pinned-${{ hashFiles('.godot-version') }}
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq unzip xvfb xauth mesa-vulkan-drivers libvulkan1 libgl1 libx11-6 libxcursor1 libxinerama1 libxrandr2 libxi6 libxext6 libxrender1 libfontconfig1
+      - name: Compare GPU kernels with CPU on Mesa lavapipe
+        run: |
+          GODOT="$(scripts/fetch-godot.sh)"
+          cargo build -p terrain-godot
+          "$GODOT" --headless --path app --import || true
+          xvfb-run -a "$GODOT" --path app --rendering-driver vulkan --script res://tests/gpu_test.gd
+
+  lib-linux:
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p terrain-godot
+      - run: mkdir -p dist && cp target/release/libterrain_godot.so dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lib-linux
+          path: dist/
+          if-no-files-found: error
+
+  lib-windows:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p terrain-godot
+      - run: New-Item -ItemType Directory -Force dist | Out-Null; Copy-Item target\release\terrain_godot.dll dist\
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lib-windows
+          path: dist/
+          if-no-files-found: error
+
+  lib-macos:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          cargo build --release -p terrain-godot --target aarch64-apple-darwin
+          cargo build --release -p terrain-godot --target x86_64-apple-darwin
+          mkdir -p dist
+          lipo -create -output dist/libterrain_godot.dylib target/aarch64-apple-darwin/release/libterrain_godot.dylib target/x86_64-apple-darwin/release/libterrain_godot.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lib-macos
+          path: dist/
+          if-no-files-found: error
+
+  package-linux:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    needs: [lib-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: lib-linux
+          path: dist
+      - uses: actions/cache@v4
+        with:
+          path: .godot-cache
+          key: godot-templates-${{ hashFiles('.godot-version') }}
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq unzip zip
+      - run: |
+          export GODOT="$(scripts/fetch-godot.sh --templates)"
+          LIB_DIR=dist scripts/package.sh linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-linux
+          path: build/*.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [fmt, clippy, test, godot-smoke, godot-gpu, lib-linux, lib-windows, lib-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lib-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/cache@v4
+        with:
+          path: .godot-cache
+          key: godot-templates-${{ hashFiles('.godot-version') }}
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq unzip zip
+      - name: Check tag and package desktop apps
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          APP_VERSION="$(sed -n 's/^config\/version="\(.*\)"/\1/p' app/project.godot)"
+          case "$TAG" in
+            "v$APP_VERSION" | "v$APP_VERSION"-*) ;;
+            *) echo "Tag $TAG does not match config/version $APP_VERSION"; exit 1 ;;
+          esac
+          export GODOT="$(scripts/fetch-godot.sh --templates)"
+          LIB_DIR=dist scripts/package.sh linux windows macos
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" build/*.zip --clobber
+          else
+            gh release create "$TAG" build/*.zip --verify-tag \
+              --title "OpenTerrainStudio $TAG" \
+              --notes "Download the zip for your system, unzip it and run OpenTerrainStudio. Builds are not code-signed yet. On Windows, choose More info > Run anyway in SmartScreen. On macOS, right-click OpenTerrainStudio.app and choose Open."
+          fi

@@ -1,7 +1,7 @@
 # OpenTerrainStudio — Architecture
 
 OpenTerrainStudio is an open-source project by **EllisonDigital**.
-Repository: `gitlab.com/EllisonDigital/open-terrain-studio/open-terrain-studio`
+Repository: `github.com/EllisonDigital/open-terrain-studio`
 
 This document describes the technical architecture. The milestone plan lives in [ROADMAP.md](ROADMAP.md).
 
@@ -342,13 +342,10 @@ The extension is `.otstudio`. It avoids `.terrain` (Gaea's project extension) an
 **Hosting**
 
 ```text
-gitlab.com/EllisonDigital/open-terrain-studio                        (subgroup)
-gitlab.com/EllisonDigital/open-terrain-studio/open-terrain-studio    (this repo)
-gitlab.com/EllisonDigital/open-terrain-studio/examples               (from v0.7)
-gitlab.com/EllisonDigital/open-terrain-studio/docs                   (from v0.9)
+github.com/EllisonDigital/open-terrain-studio    (this repo)
 ```
 
-Milestones (v0.1–v1.0) and labels (`node`, `ui`, `gpu`, `export`, `bug`, `good first issue`, `performance`) are defined at subgroup level so they are shared across projects. An optional read-only GitHub mirror may be added for discoverability; issues and merge requests stay on GitLab.
+Milestones (v0.1–v1.0) and labels (`node`, `ui`, `gpu`, `export`, `bug`, `good first issue`, `performance`) are managed on the GitHub repository. Issues and pull requests are handled there.
 
 **Repository layout**
 
@@ -368,7 +365,7 @@ open-terrain-studio/
 ├── LICENSE-MIT
 ├── LICENSE-APACHE
 ├── CONTRIBUTING.md
-└── .gitlab-ci.yml          # CI: build + test on Linux/Windows/macOS
+└── .github/workflows/ci.yml # CI: build + test on Linux/Windows/macOS
 ```
 
 **Testing**
@@ -383,7 +380,7 @@ open-terrain-studio/
   > **Changed 25 Sep 2026 (v0.4):** `app/tests/gpu_test.gd` runs every kernel against the CPU inside the app (a device needs Godot). CI runs it on Mesa's software Vulkan driver under a virtual X server; real GPUs are tested locally.
 - **Benchmarks** (`criterion`) for hot nodes, tracked per release.
 
-**CI and releases:** GitLab CI builds and tests the Rust crates and exports the Godot app on every merge request and tag. Linux jobs run on GitLab's shared runners; Windows and macOS jobs use shared runners where the plan allows, otherwise a self-hosted runner used for release builds. Tagged releases publish one download per OS through GitLab Releases; nightly builds can go to the Package Registry. `main` is protected: changes land through merge requests with passing CI.
+**CI and releases:** GitHub Actions checks the Rust crates, Godot headless tests and Linux export on pull requests and `main`. Version tags build release libraries on GitHub-hosted Linux, Windows and macOS runners, export all three apps on Linux, and attach them to a GitHub Release. Protect `main` with a branch ruleset requiring passing checks and pull requests.
 
 **Licensing:** dual MIT / Apache-2.0, the Rust ecosystem convention. Copyright holder: EllisonDigital. Godot is MIT and gdext is MPL-2.0, both compatible with shipping under this licence.
 

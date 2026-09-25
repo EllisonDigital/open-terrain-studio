@@ -8,7 +8,7 @@ edition = "2024"
 rust-version = "1.94"
 license = "MIT OR Apache-2.0"
 authors = ["EllisonDigital"]
-repository = "https://gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio"
+repository = "https://github.com/EllisonDigital/open-terrain-studio"
 publish = false
 
 [workspace.dependencies]

@@ -25,7 +25,7 @@ OpenTerrainStudio is built with a Rust terrain engine and a Godot 4 editor, and 
 ## Download
 
 Builds for Windows, macOS and Linux are attached to each release on the
-[Releases page](https://gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio/-/releases).
+[Releases page](https://github.com/EllisonDigital/open-terrain-studio/releases).
 Download the zip for your system, unzip it and run OpenTerrainStudio. Nothing else needs installing.
 
 | System | Download | Notes |
@@ -50,7 +50,7 @@ You need:
 - [Godot](https://godotengine.org/download) 4.6 or newer (the standard build, not .NET)
 
 ```sh
-git clone https://gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio.git
+git clone git@github.com:EllisonDigital/open-terrain-studio.git
 cd open-terrain-studio
 cargo build          # builds the Rust terrain engine and the Godot extension
 godot --path app     # runs the app
@@ -75,8 +75,8 @@ the current OS by default. Godot can export all three from Linux, given each OS'
 `LIB_DIR=dist scripts/package.sh linux windows macos`. On Windows, use `scripts\package.ps1`. On other
 systems, install the templates from the Godot editor (*Editor → Manage Export Templates*).
 
-Pushing a `v*` tag makes CI build the library on all three OSes, export the apps and publish a GitLab
-Release; see [`.gitlab-ci.yml`](.gitlab-ci.yml).
+Pushing a version tag such as `v0.2.0` makes GitHub Actions build the library on all three OSes,
+export the apps and publish a GitHub Release; see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ### Using the app (v0.2)
 
@@ -125,8 +125,8 @@ to a shaded PNG: `cargo run --release -p terrain-nodes --example render -- terra
 
 ## Contributing
 
-Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md), including how to add a node (pure Rust, no UI code). Issues and merge requests are handled on GitLab:
-`gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio`
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md), including how to add a node (pure Rust, no UI code). Issues and pull requests are handled on GitHub:
+`github.com/EllisonDigital/open-terrain-studio`
 
 Every commit must be signed off under the [Developer Certificate of Origin](https://developercertificate.org/). Use `git commit -s` to add the `Signed-off-by:` line.
 

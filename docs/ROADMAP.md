@@ -1,6 +1,6 @@
 # OpenTerrainStudio — Roadmap
 
-This document tracks milestones, risks and decisions. The technical design lives in [ARCHITECTURE.md](ARCHITECTURE.md). Each milestone here matches a GitLab milestone in the `EllisonDigital/open-terrain-studio` subgroup.
+This document tracks milestones, risks and decisions. The technical design lives in [ARCHITECTURE.md](ARCHITECTURE.md). Milestones are tracked in the `EllisonDigital/open-terrain-studio` GitHub repository.
 
 ---
 
@@ -38,7 +38,7 @@ Exit criteria, as checked:
 
 **Deliverables**
 
-- Cargo workspace with `terrain-core`, `terrain-nodes`, `terrain-godot`; Godot 4 project in `app/`; GitLab CI building all three OSes.
+- Cargo workspace with `terrain-core`, `terrain-nodes`, `terrain-godot`; Godot 4 project in `app/`; GitHub Actions building all three OSes for releases.
 - `LICENSE-MIT`, `LICENSE-APACHE`, `CONTRIBUTING.md` (with DCO sign-off), protected `main` branch.
 - `Heightfield` / `Mask` types with world extent, cell size, metres (ARCHITECTURE.md §4).
 - `NodeKind` trait, `NodeSchema`, graph model, simple evaluator (no caching yet), seeding.
@@ -221,7 +221,7 @@ All colour work lives in the dedicated **Colour** tab (ARCHITECTURE.md §5). Ter
 - Import helpers: Unreal editor Python script, Godot editor plugin, Blender add-on, all reading `build.json`.
 - UX pass: keyboard shortcuts, node thumbnails, tooltips from the schema, consistent icons, dark/light themes, recent projects, crash-safe autosave.
 - In-app help panel per node (generated from node docs).
-- User documentation site in the `docs` project, published with GitLab Pages: getting started, every node, export guides per engine, example projects.
+- User documentation site, published with GitHub Pages: getting started, every node, export guides per engine, example projects.
 - Performance pass guided by benchmarks; startup under 3 seconds.
 - Opt-in crash reporting (local log + "copy report" button; no telemetry by default).
 
@@ -236,7 +236,7 @@ All colour work lives in the dedicated **Colour** tab (ARCHITECTURE.md §5). Ter
 - Project format frozen at a stable version, with migrations from every 0.x format tested.
 - Node parameter names and behaviour frozen; future changes go through `type_version` migrations.
 - Public beta (release candidates) with a bug-fix-only period.
-- Signed installers for Windows and macOS, AppImage/Flatpak for Linux, published through GitLab Releases.
+- Signed installers for Windows and macOS, AppImage/Flatpak for Linux, published through GitHub Releases.
 - Complete docs, example project library, and a contributor guide for writing new nodes.
 - Release notes and a public roadmap for 1.x (candidates: CLI, wgpu backend, plugins, more simulations, AI-assisted presets).
 
@@ -253,7 +253,7 @@ All colour work lives in the dedicated **Colour** tab (ARCHITECTURE.md §5). Ter
 | GPU driver differences | Inconsistent results, crashes | CPU reference, tolerance tests on three vendors, short dispatches |
 | Memory at 8K+ | Crashes on large builds | Tile-aware data model from v0.1, LRU cache, tiling in v0.8 |
 | Godot GraphEdit limits at 200+ nodes | Sluggish editor | Profile early; fall back to a custom graph control if needed |
-| Windows/macOS CI runners unavailable on the GitLab plan | No automated builds for those OSes | Self-hosted GitLab runner on a local Windows/Mac machine for release builds |
+| Windows/macOS CI runner limits on GitHub | Release builds may be delayed | Monitor Actions quotas; use self-hosted runners if needed |
 | Scope creep | Never reaching 1.0 | Every milestone has exit criteria; new ideas go to the 1.x roadmap |
 | Solo-developer bandwidth | Slow progress | Clear node API and "add a node" guide to attract contributors; AI agents for well-specified, tested tasks |
 
@@ -261,7 +261,7 @@ All colour work lives in the dedicated **Colour** tab (ARCHITECTURE.md §5). Ter
 
 - Name: **OpenTerrainStudio** (written "Open Terrain Studio" in prose), project extension `.otstudio`.
 - Owner: EllisonDigital, which holds the copyright and the "OpenTerrainStudio" trademark.
-- Hosting: GitLab subgroup `EllisonDigital/open-terrain-studio`, main repo `open-terrain-studio`; `examples` (v0.7) and `docs` (v0.9) added later. Optional read-only GitHub mirror.
+- Hosting: moved to GitHub at `EllisonDigital/open-terrain-studio`; issues, pull requests and releases live there. The earlier GitLab subgroup plan is superseded.
 - Crates: internal workspace crates are `terrain-core`, `terrain-nodes` and `terrain-godot` (not published). Any crate published to crates.io uses the `openterrainstudio-` prefix (`ots-core` is already taken).
 - Licence: dual MIT / Apache-2.0.
 - Contributions: Developer Certificate of Origin (DCO) sign-off, no CLA.
