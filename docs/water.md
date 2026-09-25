@@ -95,7 +95,8 @@ a River, Lakes or Sea mask).
 
 For a heightfield made with Rivers, Lakes or Sea, the 3D view draws water: the highest water surface of
 those nodes where it's more than 1 cm above their own height, as a translucent surface that darkens with
-depth. Masks are drawn without water, so overlays stay readable.
+depth. It also paints the snow cover of any Snow node upstream in white, since the snow's depth alone
+is too small to see. Masks are drawn without water or snow, so overlays stay readable.
 
 ## Tests
 
