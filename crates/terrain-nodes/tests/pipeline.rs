@@ -510,3 +510,53 @@ fn file_node_reads_relative_paths_and_notices_changes() {
     );
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn finds_the_terrain_under_a_mask() {
+    let reg = registry();
+    let (mut p, [_, levels, _]) = chain(&reg);
+    let slope = p.graph.add_node(&reg, "data.slope", [0.0, 0.0]).unwrap();
+    let select = p.graph.add_node(&reg, "data.select_range", [0.0, 0.0]).unwrap();
+    p.graph.connect(&reg, &levels, "out", &slope, "in").unwrap();
+    p.graph.connect(&reg, &slope, "out", &select, "in").unwrap();
+    let base = Some((levels.clone(), "out".to_string()));
+    assert_eq!(p.graph.base_heightfield(&reg, &slope), base);
+    assert_eq!(
+        p.graph.base_heightfield(&reg, &select),
+        base,
+        "found through another mask"
+    );
+    let lonely = p.graph.add_node(&reg, "noise.perlin", [0.0, 0.0]).unwrap();
+    assert_eq!(p.graph.base_heightfield(&reg, &lonely), None);
+}
+
+/// The bundled examples (the v0.2 reference landforms) load without warnings,
+/// use only built-in nodes, and every marked output builds.
+#[test]
+fn bundled_examples_load_and_build() {
+    let reg = registry();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/examples");
+    let mut found = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "otstudio") {
+            continue;
+        }
+        found += 1;
+        let (p, warnings) = Project::load(&path, &reg).unwrap();
+        assert!(warnings.is_empty(), "{}: {warnings:?}", path.display());
+        let viewed = p.ui["viewed_node"].as_str().unwrap();
+        let (g, _) = support::eval(&p, &reg, viewed, 129);
+        let (lo, hi) = g.min_max();
+        assert!(hi > lo, "{}: flat", path.display());
+        assert!(
+            !p.exports.is_empty(),
+            "{}: nothing marked for export",
+            path.display()
+        );
+        let out = temp_dir(&format!("example-{found}"));
+        build_marked(&p, &reg, 65, &out, &EvalOptions::default()).unwrap();
+        std::fs::remove_dir_all(&out).ok();
+    }
+    assert_eq!(found, 3);
+}

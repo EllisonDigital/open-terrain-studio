@@ -130,14 +130,15 @@ impl NodeKind for Mountain {
             let len = (px * px + py * py).sqrt().max(1e-9);
             let k = 1.3 + r * 1.1;
             let (qx, qy) = (px / len * k, py / len * k);
+            // Few octaves: fine detail in these coordinates becomes thin streaks.
             let radial = basis::ridged(
                 Basis::Perlin,
                 qx + 31.7,
                 qy - 12.9,
                 derive(seed, 3),
-                if alpine { 7 } else { 4 },
+                if alpine { 5 } else { 3 },
                 2.0,
-                if alpine { 0.5 } else { 0.4 },
+                0.45,
             );
             let random = basis::ridged(
                 Basis::Perlin,

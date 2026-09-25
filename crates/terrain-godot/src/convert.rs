@@ -52,8 +52,41 @@ pub fn variant_to_param(v: &Variant) -> Option<ParamValue> {
             .try_to::<GString>()
             .ok()
             .map(|s| ParamValue::Text(s.to_string())),
+        // Curves: a list of points.
+        VariantType::PACKED_VECTOR2_ARRAY => v.try_to::<PackedVector2Array>().ok().map(|pts| {
+            ParamValue::Other(serde_json::Value::Array(
+                pts.as_slice()
+                    .iter()
+                    .map(|p| serde_json::json!([p.x as f64, p.y as f64]))
+                    .collect(),
+            ))
+        }),
+        VariantType::ARRAY => variant_to_json(v).map(ParamValue::Other),
         _ => None,
     }
+}
+
+/// Convert plain data (numbers, strings, bools, arrays of them) to JSON.
+fn variant_to_json(v: &Variant) -> Option<serde_json::Value> {
+    Some(match v.get_type() {
+        VariantType::NIL => serde_json::Value::Null,
+        VariantType::BOOL => v.try_to::<bool>().ok()?.into(),
+        VariantType::INT => v.try_to::<i64>().ok()?.into(),
+        VariantType::FLOAT => serde_json::Number::from_f64(v.try_to::<f64>().ok()?)?.into(),
+        VariantType::STRING | VariantType::STRING_NAME => v.try_to::<GString>().ok()?.to_string().into(),
+        VariantType::VECTOR2 => {
+            let p = v.try_to::<Vector2>().ok()?;
+            serde_json::json!([p.x as f64, p.y as f64])
+        }
+        VariantType::ARRAY => serde_json::Value::Array(
+            v.try_to::<VarArray>()
+                .ok()?
+                .iter_shared()
+                .map(|item| variant_to_json(&item))
+                .collect::<Option<Vec<_>>>()?,
+        ),
+        _ => return None,
+    })
 }
 
 /// Helper: set `dict[key] = value`.

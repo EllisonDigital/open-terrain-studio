@@ -6,13 +6,19 @@ extends GraphEdit
 signal node_activated(id: String)   ## a node was selected (it becomes the viewed node)
 signal selection_cleared
 signal graph_edited                 ## structure changed (nodes/links)
+signal layout_edited                ## nodes moved (no effect on the terrain)
 signal status(message: String)
+
+var project: TerrainProject         ## for grouping multi-node edits into one undo step
 
 const PORT_COLORS := {
 	"heightfield": Color(0.95, 0.72, 0.30),
 	"mask": Color(0.55, 0.75, 0.95),
 }
 const PORT_SLOT_TYPES := {"heightfield": 0, "mask": 1}
+## Parameter ports (masks driving a value) get their own colour.
+const PARAM_PORT_COLOR := Color(0.55, 0.9, 0.6)
+const EXPORT_BADGE_COLOR := Color(0.55, 0.9, 0.6)
 
 var graph: TerrainGraph
 var viewed_id := ""
@@ -54,6 +60,26 @@ func set_graph(g: TerrainGraph) -> void:
 	graph = g
 	_build_add_menu()
 	rebuild()
+	frame_all.call_deferred()
+
+
+## Zoom and scroll so every node is visible (at most 100% zoom).
+func frame_all() -> void:
+	# Node sizes are only known after a layout pass.
+	await get_tree().process_frame
+	var bounds := Rect2()
+	var first := true
+	for child in get_children():
+		if child is GraphNode:
+			var r := Rect2(child.position_offset, child.size)
+			bounds = r if first else bounds.merge(r)
+			first = false
+	if first or size.x <= 0.0:
+		return
+	bounds = bounds.grow(40.0)
+	var fit := minf(size.x / bounds.size.x, size.y / bounds.size.y)
+	zoom = clampf(fit, 0.35, 1.0)
+	scroll_offset = bounds.get_center() * zoom - size * 0.5
 
 
 ## Redraw every node and link from the core.
@@ -123,8 +149,15 @@ func _add_graph_node(node: Dictionary, selected: bool) -> void:
 		var right := Label.new()
 		left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		right.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		var is_param: bool = i < inputs.size() and inputs[i].has("param")
 		if i < inputs.size():
-			left.text = inputs[i]["label"] + ("" if not inputs[i]["optional"] else " (opt.)")
+			if is_param:
+				left.text = inputs[i]["label"]
+				left.add_theme_color_override("font_color", PARAM_PORT_COLOR)
+				left.tooltip_text = "Mask port: scales %s" % inputs[i]["label"]
+				left.mouse_filter = Control.MOUSE_FILTER_PASS
+			else:
+				left.text = inputs[i]["label"] + ("" if not inputs[i]["optional"] else " (opt.)")
 		if i < outputs.size():
 			right.text = outputs[i]["label"]
 		row.add_child(left)
@@ -134,8 +167,17 @@ func _add_graph_node(node: Dictionary, selected: bool) -> void:
 		var has_out := i < outputs.size()
 		var in_type: String = inputs[i]["type"] if has_in else "heightfield"
 		var out_type: String = outputs[i]["type"] if has_out else "heightfield"
-		gn.set_slot(i, has_in, PORT_SLOT_TYPES[in_type], PORT_COLORS[in_type],
+		gn.set_slot(i, has_in, PORT_SLOT_TYPES[in_type], PARAM_PORT_COLOR if is_param else PORT_COLORS[in_type],
 				has_out, PORT_SLOT_TYPES[out_type], PORT_COLORS[out_type])
+
+	if not Array(node.get("exported", PackedStringArray())).is_empty():
+		var badge := Label.new()
+		badge.text = "EXPORT"
+		badge.tooltip_text = "Marked for export: written by Build"
+		badge.mouse_filter = Control.MOUSE_FILTER_PASS
+		badge.add_theme_font_size_override("font_size", 10)
+		badge.add_theme_color_override("font_color", EXPORT_BADGE_COLOR)
+		gn.get_titlebar_hbox().add_child(badge)
 
 	_ports[node["id"]] = {
 		"inputs": inputs.map(func(p): return p["key"]),
@@ -170,7 +212,7 @@ func _build_add_menu() -> void:
 	var by_category := {}
 	for t in graph.get_node_types():
 		by_category.get_or_add(t["category"], []).append(t)
-	var order := ["Primitives", "Noise", "Terrain", "Adjust", "Combine", "Simulate", "Data", "Output"]
+	var order := ["Primitives", "Noise", "Terrain", "Adjust", "Combine", "Data", "Simulate", "Output"]
 	var categories: Array = by_category.keys()
 	categories.sort_custom(func(a, b):
 		var ia := order.find(a)
@@ -222,8 +264,12 @@ func _on_disconnection_request(_from_node: StringName, _from_port: int, to_node:
 func _on_delete_nodes_request(nodes: Array[StringName]) -> void:
 	if nodes.is_empty():
 		return
+	if project != null and nodes.size() > 1:
+		project.begin_edit_group("Delete %d nodes" % nodes.size())
 	for id in nodes:
 		graph.remove_node(id)
+	if project != null:
+		project.end_edit_group()
 	rebuild()
 	graph_edited.emit()
 	selection_cleared.emit()
@@ -242,6 +288,11 @@ func _on_node_deselected(_node: Node) -> void:
 
 
 func _on_end_node_move() -> void:
+	if project != null:
+		project.begin_edit_group("Move nodes")
 	for child in get_children():
 		if child is GraphNode and child.selected:
 			graph.set_node_position(child.name, child.position_offset)
+	if project != null:
+		project.end_edit_group()
+	layout_edited.emit()

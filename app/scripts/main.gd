@@ -6,14 +6,22 @@
 extends Control
 
 const TerrainView := preload("res://scripts/terrain_view.gd")
+const MapView := preload("res://scripts/map_view.gd")
 const GraphPanel := preload("res://scripts/graph_panel.gd")
 const Inspector := preload("res://scripts/inspector.gd")
+const BuildPanel := preload("res://scripts/build_panel.gd")
 
 const PREVIEW_RESOLUTIONS := [256, 512, 1024, 2048]
 const EXPORT_RESOLUTIONS := [512, 1009, 1024, 2017, 2048, 4033, 4096, 8129, 8192]
 const REPO_URL := "https://gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio"
+## Example projects bundled with the app, built only from built-in nodes.
+const EXAMPLES := [
+	["Alpine range", "res://examples/alpine_range.otstudio"],
+	["Canyon", "res://examples/canyon.otstudio"],
+	["Dune field", "res://examples/dune_field.otstudio"],
+]
 
-enum Menu { NEW, OPEN, SAVE, SAVE_AS, EXPORT, QUIT, WORLD, DOCS, ABOUT }
+enum Menu { NEW, OPEN, SAVE, SAVE_AS, EXPORT, QUIT, WORLD, DOCS, ABOUT, UNDO, REDO, MARK_EXPORT, BUILD, EXAMPLE = 100 }
 
 var project: TerrainProject
 var graph: TerrainGraph
@@ -21,12 +29,16 @@ var builder: TerrainBuilder
 var exporter: TerrainExporter
 
 var view: SubViewportContainer
+var map_view: Control
 var graph_panel: GraphEdit
 var inspector: ScrollContainer
+var build_panel: ScrollContainer
+var side_tabs: TabContainer
 
 var project_path := ""
 var viewed_id := ""
 var preview_resolution := 512
+var view_2d := false
 
 var _status_label: Label
 var _stats_label: Label
@@ -42,6 +54,9 @@ var _folder_dialog: FileDialog
 var _confirm: ConfirmationDialog
 var _confirm_action: Callable
 var _message: AcceptDialog
+var _edit_menu: PopupMenu
+var _view_switch: OptionButton
+var _last_preview: TerrainPreview
 
 
 func _ready() -> void:
@@ -79,6 +94,13 @@ func _build_ui() -> void:
 	file_menu.name = "File"
 	file_menu.add_item("New", Menu.NEW, KEY_MASK_CMD_OR_CTRL | KEY_N)
 	file_menu.add_item("Open…", Menu.OPEN, KEY_MASK_CMD_OR_CTRL | KEY_O)
+	var examples := PopupMenu.new()
+	examples.name = "examples"
+	for i in EXAMPLES.size():
+		examples.add_item(EXAMPLES[i][0], Menu.EXAMPLE + i)
+	examples.id_pressed.connect(_on_menu)
+	file_menu.add_child(examples)
+	file_menu.add_submenu_node_item("Open Example", examples)
 	file_menu.add_separator()
 	file_menu.add_item("Save", Menu.SAVE, KEY_MASK_CMD_OR_CTRL | KEY_S)
 	file_menu.add_item("Save As…", Menu.SAVE_AS, KEY_MASK_CMD_OR_CTRL | KEY_MASK_SHIFT | KEY_S)
@@ -88,6 +110,19 @@ func _build_ui() -> void:
 	file_menu.add_item("Quit", Menu.QUIT, KEY_MASK_CMD_OR_CTRL | KEY_Q)
 	file_menu.id_pressed.connect(_on_menu)
 	menubar.add_child(file_menu)
+	_edit_menu = PopupMenu.new()
+	_edit_menu.name = "Edit"
+	_edit_menu.add_item("Undo", Menu.UNDO, KEY_MASK_CMD_OR_CTRL | KEY_Z)
+	_edit_menu.add_item("Redo", Menu.REDO, KEY_MASK_CMD_OR_CTRL | KEY_MASK_SHIFT | KEY_Z)
+	_edit_menu.id_pressed.connect(_on_menu)
+	_edit_menu.about_to_popup.connect(_update_edit_menu)
+	menubar.add_child(_edit_menu)
+	var build_menu := PopupMenu.new()
+	build_menu.name = "Build"
+	build_menu.add_item("Mark Viewed Output for Export", Menu.MARK_EXPORT, KEY_MASK_CMD_OR_CTRL | KEY_MASK_SHIFT | KEY_E)
+	build_menu.add_item("Build Marked Outputs", Menu.BUILD, KEY_MASK_CMD_OR_CTRL | KEY_B)
+	build_menu.id_pressed.connect(_on_menu)
+	menubar.add_child(build_menu)
 	var project_menu := PopupMenu.new()
 	project_menu.name = "Project"
 	project_menu.add_item("World Settings", Menu.WORLD)
@@ -115,24 +150,48 @@ func _build_ui() -> void:
 	view_box.size_flags_stretch_ratio = 1.8
 	view_box.add_theme_constant_override("separation", 0)
 	vsplit.add_child(view_box)
-	view_box.add_child(_build_view_toolbar())
 	view = TerrainView.new()
-	view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	view_box.add_child(view)
+	map_view = MapView.new()
+	view_box.add_child(_build_view_toolbar())
+	var stack := Control.new()
+	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	view_box.add_child(stack)
+	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	stack.add_child(view)
+	map_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	map_view.visible = false
+	stack.add_child(map_view)
 
 	graph_panel = GraphPanel.new()
 	graph_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	graph_panel.node_activated.connect(_on_node_activated)
 	graph_panel.selection_cleared.connect(_on_selection_cleared)
 	graph_panel.graph_edited.connect(_on_graph_edited)
+	graph_panel.layout_edited.connect(_update_title)
 	graph_panel.status.connect(_set_status)
+	graph_panel.project = project
 	vsplit.add_child(graph_panel)
 
+	side_tabs = TabContainer.new()
+	side_tabs.custom_minimum_size = Vector2(340, 0)
+	hsplit.add_child(side_tabs)
 	inspector = Inspector.new()
+	inspector.name = "Settings"
 	inspector.project = project
 	inspector.param_changed.connect(_on_param_changed)
+	inspector.port_toggled.connect(_on_port_toggled)
+	inspector.export_toggled.connect(_on_export_toggled)
 	inspector.world_changed.connect(_on_world_changed)
-	hsplit.add_child(inspector)
+	side_tabs.add_child(inspector)
+	build_panel = BuildPanel.new()
+	build_panel.name = "Build"
+	build_panel.project = project
+	build_panel.build_requested.connect(_start_build)
+	build_panel.export_toggled.connect(_on_export_toggled)
+	build_panel.view_requested.connect(func(id):
+		graph_panel.select_node(id)
+		_view_node(id))
+	side_tabs.add_child(build_panel)
 
 	# Status bar.
 	var status_bar := PanelContainer.new()
@@ -157,6 +216,13 @@ func _build_view_toolbar() -> Control:
 	var bar := HBoxContainer.new()
 	bar.add_theme_constant_override("separation", 12)
 
+	_view_switch = OptionButton.new()
+	_view_switch.add_item("3D")
+	_view_switch.add_item("2D map")
+	_view_switch.tooltip_text = "3D terrain, or the 2D map with the value under the mouse (Tab)"
+	_view_switch.item_selected.connect(func(i): _set_view_2d(i == 1))
+	bar.add_child(_view_switch)
+
 	bar.add_child(_label("Preview"))
 	var res := OptionButton.new()
 	for r in PREVIEW_RESOLUTIONS:
@@ -172,7 +238,10 @@ func _build_view_toolbar() -> Control:
 	var mode := OptionButton.new()
 	for m in ["Natural", "Clay", "Height colours"]:
 		mode.add_item(m)
-	mode.item_selected.connect(func(i): view.set_view_mode(i))
+	mode.tooltip_text = "Colouring. Masks are always shown as a colour overlay on the terrain they came from."
+	mode.item_selected.connect(func(i):
+		view.set_view_mode(i)
+		map_view.set_view_mode(i))
 	bar.add_child(mode)
 
 	bar.add_child(_label("Vertical scale"))
@@ -198,9 +267,20 @@ func _build_view_toolbar() -> Control:
 
 	var frame := Button.new()
 	frame.text = "Frame (F)"
-	frame.pressed.connect(func(): view.frame_all())
+	frame.pressed.connect(func():
+		view.frame_all()
+		map_view.fit())
 	bar.add_child(frame)
 	return bar
+
+
+func _set_view_2d(on: bool) -> void:
+	view_2d = on
+	_view_switch.select(1 if on else 0)
+	view.visible = not on
+	map_view.visible = on
+	if _last_preview != null:
+		(map_view if on else view).show_preview(_last_preview)
 
 
 func _label(text: String) -> Label:
@@ -299,7 +379,7 @@ func _new_project_with_starter_graph() -> void:
 	var fbm := graph.add_node("noise.fbm", Vector2(40, 60))
 	var levels := graph.add_node("adjust.levels", Vector2(340, 60))
 	graph.connect_ports(fbm, "out", levels, "in")
-	project.clear_modified()
+	project.reset_history()
 	_after_project_loaded(levels)
 	_set_status("New project. Right-click the graph to add nodes; click a node to view it.")
 
@@ -309,6 +389,23 @@ func _open_project(path: String) -> void:
 		_show_message("Could not open project", project.get_last_error())
 		return
 	project_path = path
+	_restore_ui_state()
+	_set_status("Opened %s" % path.get_file())
+
+
+## Open a bundled example as a new, untitled project.
+func _open_example(index: int) -> void:
+	var example: Array = EXAMPLES[index]
+	var json := FileAccess.get_file_as_string(example[1])
+	if json == "" or not project.load_json(json):
+		_show_message("Could not open example", project.get_last_error())
+		return
+	project_path = ""
+	_restore_ui_state()
+	_set_status("Opened the %s example. Save it to keep your changes." % example[0])
+
+
+func _restore_ui_state() -> void:
 	var ui: Variant = JSON.parse_string(project.get_ui_state())
 	var state: Dictionary = ui if ui is Dictionary else {}
 	var viewed: String = state.get("viewed_node", "")
@@ -319,10 +416,10 @@ func _open_project(path: String) -> void:
 		preview_resolution = int(state["preview_resolution"])
 	_after_project_loaded(viewed)
 	view.set_camera_state(state.get("camera", {}))
+	_set_view_2d(state.get("view_2d", false))
 	var warnings := project.get_warnings()
 	if warnings.size() > 0:
 		_show_message("Opened with warnings", "\n".join(warnings))
-	_set_status("Opened %s" % path.get_file())
 
 
 func _save_project(path: String) -> bool:
@@ -330,6 +427,7 @@ func _save_project(path: String) -> bool:
 		"viewed_node": viewed_id,
 		"preview_resolution": preview_resolution,
 		"camera": view.get_camera_state(),
+		"view_2d": view_2d,
 	}))
 	if not project.save(path):
 		_show_message("Could not save project", project.get_last_error())
@@ -342,9 +440,13 @@ func _save_project(path: String) -> bool:
 
 func _after_project_loaded(viewed: String) -> void:
 	graph_panel.set_graph(graph)
-	view.set_world(project.get_world_size(), project.get_height_min(), project.get_height_max())
+	_apply_world()
 	view.clear()
+	map_view.clear()
+	_last_preview = null
 	view.frame_all()
+	map_view.fit()
+	build_panel.refresh()
 	viewed_id = ""
 	if viewed != "":
 		graph_panel.select_node(viewed)
@@ -352,6 +454,11 @@ func _after_project_loaded(viewed: String) -> void:
 	else:
 		inspector.show_world()
 	_update_title()
+
+
+func _apply_world() -> void:
+	view.set_world(project.get_world_size(), project.get_height_min(), project.get_height_max())
+	map_view.set_world(project.get_world_size(), project.get_height_min(), project.get_height_max())
 
 
 func _update_title() -> void:
@@ -390,6 +497,8 @@ func _request_preview() -> void:
 	if viewed_id == "" or not graph.has_node(viewed_id):
 		builder.cancel()
 		view.clear()
+		map_view.clear()
+		_last_preview = null
 		_stats_label.text = ""
 		return
 	var port := _first_output(viewed_id)
@@ -426,6 +535,7 @@ func _on_graph_edited() -> void:
 	_update_title()
 	if viewed_id != "" and not graph.has_node(viewed_id):
 		viewed_id = ""
+	build_panel.refresh()
 	_request_preview()
 
 
@@ -434,16 +544,82 @@ func _on_param_changed(node_id: String, key: String, value: Variant) -> void:
 	if stored == null:
 		_set_status(graph.get_last_error())
 		return
-	if stored != value:
+	if typeof(stored) != TYPE_ARRAY and stored != value:
 		inspector.refresh_value(key, stored)
 	_update_title()
 	_request_preview()
 
 
+func _on_port_toggled(node_id: String, key: String, exposed: bool) -> void:
+	if not graph.set_param_exposed(node_id, key, exposed):
+		_set_status(graph.get_last_error())
+	graph_panel.rebuild()
+	_show_inspector_for(node_id)
+	_on_graph_edited()
+	if exposed:
+		_set_status("Connect a mask to the new port on the node to drive this value.")
+
+
+func _on_export_toggled(node_id: String, port: String, format: String, on: bool) -> void:
+	if not project.set_export(node_id, port, format, on):
+		_set_status(project.get_last_error())
+	graph_panel.rebuild()
+	build_panel.refresh()
+	if inspector.get_node_id() == node_id:
+		_show_inspector_for(node_id)
+	_update_title()
+
+
 func _on_world_changed() -> void:
-	view.set_world(project.get_world_size(), project.get_height_min(), project.get_height_max())
+	_apply_world()
 	_update_title()
 	_request_preview()
+
+
+# ---- undo / redo ------------------------------------------------------------
+
+func _undo_redo(redo: bool) -> void:
+	var label: String = project.redo() if redo else project.undo()
+	if label == "":
+		_set_status("Nothing to %s." % ("redo" if redo else "undo"))
+		return
+	# Everything may have changed: redraw from the core.
+	graph_panel.rebuild()
+	_apply_world()
+	if viewed_id != "" and not graph.has_node(viewed_id):
+		viewed_id = ""
+	graph_panel.set_viewed(viewed_id)
+	var shown: String = inspector.get_node_id()
+	if shown != "" and graph.has_node(shown):
+		_show_inspector_for(shown)
+	else:
+		inspector.show_world()
+	build_panel.refresh()
+	_update_title()
+	_request_preview()
+	_set_status("%s: %s" % ["Redo" if redo else "Undo", label])
+
+
+func _update_edit_menu() -> void:
+	var u := project.get_undo_label()
+	var r := project.get_redo_label()
+	_edit_menu.set_item_text(_edit_menu.get_item_index(Menu.UNDO), "Undo " + u if u != "" else "Undo")
+	_edit_menu.set_item_text(_edit_menu.get_item_index(Menu.REDO), "Redo " + r if r != "" else "Redo")
+	_edit_menu.set_item_disabled(_edit_menu.get_item_index(Menu.UNDO), not project.can_undo())
+	_edit_menu.set_item_disabled(_edit_menu.get_item_index(Menu.REDO), not project.can_redo())
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	var k := event as InputEventKey
+	if k == null or not k.pressed or k.echo:
+		return
+	# Ctrl+Y is the other common Redo shortcut.
+	if k.keycode == KEY_Y and k.is_command_or_control_pressed():
+		_undo_redo(true)
+		get_viewport().set_input_as_handled()
+	elif k.keycode == KEY_TAB and not k.is_command_or_control_pressed():
+		_set_view_2d(not view_2d)
+		get_viewport().set_input_as_handled()
 
 
 # ---- builder / exporter callbacks -----------------------------------------
@@ -454,14 +630,29 @@ func _on_build_progress(_generation: int, fraction: float) -> void:
 
 func _on_preview_ready(preview: TerrainPreview) -> void:
 	_progress.visible = false
-	view.show_preview(preview)
-	_stats_label.text = "%d²  ·  %.0f – %.0f m" % [preview.get_resolution(), preview.get_min(), preview.get_max()]
+	_last_preview = preview
+	if view_2d:
+		map_view.show_preview(preview)
+	else:
+		view.show_preview(preview)
+	var span_text := "%.0f – %.0f m" % [preview.get_min(), preview.get_max()]
+	if preview.get_port_type() == "mask":
+		span_text = "mask %.2f – %.2f" % [preview.get_min(), preview.get_max()]
+		if preview.get_base_node_id() != "":
+			span_text += " on %s" % preview.get_base_node_id()
+	var n := preview.get_computed_nodes()
+	_stats_label.text = "%d²  ·  %s  ·  %s, %.0f ms" % [
+		preview.get_resolution(), span_text,
+		"from cache" if n == 0 else "%d node%s computed" % [n, "" if n == 1 else "s"],
+		preview.get_millis()]
 	_set_status("")
 
 
 func _on_preview_failed(_generation: int, message: String) -> void:
 	_progress.visible = false
 	view.clear()
+	map_view.clear()
+	_last_preview = null
 	_stats_label.text = ""
 	_set_status("⚠ " + message)
 
@@ -485,8 +676,29 @@ func _start_export() -> void:
 		_set_status("Exporting at %d²…" % res)
 
 
+## Build every marked output (Build tab / Ctrl+B).
+func _start_build(resolution: int, folder: String) -> void:
+	if project.get_exports().is_empty():
+		side_tabs.current_tab = build_panel.get_index()
+		_show_message("Build", "Nothing is marked for export yet. Select a node and tick a format under Export in its settings.")
+		return
+	if folder == "":
+		folder = "output"
+	if project.get_project_dir() == "" and not folder.is_absolute_path():
+		folder = _default_export_folder()
+	project.set_build_resolution(resolution)
+	project.set_build_folder(folder)
+	if exporter.request_build(project, resolution, folder):
+		build_panel.busy = true
+		_progress.visible = true
+		_progress.value = 0
+		_set_status("Building %d output%s at %d²…" % [project.get_exports().size(), "" if project.get_exports().size() == 1 else "s", resolution])
+
+
 func _on_export_finished(ok: bool, message: String, files: PackedStringArray) -> void:
 	_progress.visible = false
+	build_panel.busy = false
+	build_panel.refresh()
 	_update_title()
 	if ok:
 		_set_status("Exported %d files to %s" % [files.size(), files[0].get_base_dir()])
@@ -498,6 +710,9 @@ func _on_export_finished(ok: bool, message: String, files: PackedStringArray) ->
 # ---- menus ----------------------------------------------------------------
 
 func _on_menu(id: int) -> void:
+	if id >= Menu.EXAMPLE:
+		_confirm_discard(_open_example.bind(id - Menu.EXAMPLE))
+		return
 	match id:
 		Menu.NEW:
 			_confirm_discard(_new_project_with_starter_graph)
@@ -520,6 +735,25 @@ func _on_menu(id: int) -> void:
 			_export_dialog.popup_centered()
 		Menu.QUIT:
 			_confirm_discard(func(): get_tree().quit())
+		Menu.UNDO:
+			_undo_redo(false)
+		Menu.REDO:
+			_undo_redo(true)
+		Menu.MARK_EXPORT:
+			if viewed_id == "":
+				_show_message("Export", "View a node first (click it in the graph).")
+				return
+			var port := _first_output(viewed_id)
+			var marked := not project.get_export_formats(viewed_id, port).is_empty()
+			project.begin_edit_group("Unmark for export" if marked else "Mark for export")
+			for f in ["exr32", "png16"]:
+				project.set_export(viewed_id, port, f, not marked)
+			project.end_edit_group()
+			_on_export_toggled(viewed_id, port, "exr32", not marked)
+			_set_status("%s %s for export." % ["Unmarked" if marked else "Marked", viewed_id])
+		Menu.BUILD:
+			side_tabs.current_tab = build_panel.get_index()
+			_start_build(project.get_build_resolution(), project.get_build_folder())
 		Menu.WORLD:
 			graph_panel.select_node("")
 			inspector.show_world()

@@ -20,6 +20,7 @@ var _sun: DirectionalLight3D
 var _terrain: MeshInstance3D
 var _material: ShaderMaterial
 var _texture: ImageTexture
+var _overlay: ImageTexture
 var _mesh_res := 0
 var _exaggeration := 1.0
 
@@ -106,26 +107,39 @@ func set_world(size_m: float, h_min: float, h_max: float) -> void:
 	_update_camera()
 
 
-## Show a TerrainPreview (heightfield in metres, or a 0..1 mask).
+## Show a TerrainPreview. Heightfields are shown as terrain. Masks are drawn
+## as a false-colour overlay on the terrain they were computed from; a mask
+## with no terrain upstream is shown as relief over the world height range.
 func show_preview(preview: TerrainPreview) -> void:
 	var img: Image = preview.get_image()
 	if img == null:
 		return
-	if _texture != null and _texture.get_width() == img.get_width():
-		_texture.update(img)
-	else:
-		_texture = ImageTexture.create_from_image(img)
+	var is_mask := preview.get_port_type() == "mask"
+	var base: Image = preview.get_base_image() if is_mask else null
+	var height_img: Image = base if base != null else img
+	_texture = _update_texture(_texture, height_img)
 	_material.set_shader_parameter("height_tex", _texture)
-	if preview.get_port_type() == "mask":
+	if is_mask and base == null:
 		_material.set_shader_parameter("value_scale", height_max - height_min)
 		_material.set_shader_parameter("value_offset", height_min)
 	else:
 		_material.set_shader_parameter("value_scale", 1.0)
 		_material.set_shader_parameter("value_offset", 0.0)
+	_material.set_shader_parameter("show_overlay", is_mask)
+	if is_mask:
+		_overlay = _update_texture(_overlay, img)
+		_material.set_shader_parameter("overlay_tex", _overlay)
 	var res := mini(img.get_width(), MAX_MESH_RES)
 	if res != _mesh_res:
 		_build_mesh(res)
 	_terrain.visible = true
+
+
+func _update_texture(tex: ImageTexture, img: Image) -> ImageTexture:
+	if tex != null and tex.get_width() == img.get_width():
+		tex.update(img)
+		return tex
+	return ImageTexture.create_from_image(img)
 
 
 func clear() -> void:

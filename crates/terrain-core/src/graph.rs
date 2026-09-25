@@ -258,6 +258,38 @@ impl Graph {
         seen
     }
 
+    /// The nearest Heightfield output upstream of `id` (breadth-first, inputs
+    /// in port order): the terrain a mask was computed from, for draping the
+    /// mask over it in the 3D view. `None` if there isn't one.
+    pub fn base_heightfield(&self, registry: &NodeRegistry, id: &str) -> Option<(NodeId, String)> {
+        let mut queue = std::collections::VecDeque::from([id.to_string()]);
+        let mut seen = BTreeSet::from([id.to_string()]);
+        while let Some(n) = queue.pop_front() {
+            let Ok(ports) = self.input_ports(registry, &n) else {
+                continue;
+            };
+            for port in ports {
+                let Some(link) = self.link_into(&n, &port.key) else {
+                    continue;
+                };
+                let from = &link.from;
+                let ty = self
+                    .nodes
+                    .get(&from.0)
+                    .and_then(|f| registry.schema(&f.type_id))
+                    .and_then(|s| s.output(&from.1))
+                    .map(|o| o.ty);
+                if ty == Some(crate::node::PortType::Heightfield) {
+                    return Some(from.clone());
+                }
+                if seen.insert(from.0.clone()) {
+                    queue.push_back(from.0.clone());
+                }
+            }
+        }
+        None
+    }
+
     /// Nodes needed to compute `target`, in dependency order (target last).
     pub fn evaluation_order(&self, target: &str) -> Result<Vec<NodeId>> {
         if !self.nodes.contains_key(target) {
