@@ -75,5 +75,6 @@ pub fn registry() -> NodeRegistry {
     // Simulate
     r.register(erosion::Hydraulic::default());
     r.register(erosion::Thermal::default());
+    r.register(water::Lakes::default());
     r
 }

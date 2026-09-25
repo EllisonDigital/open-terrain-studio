@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 use terrain_core::error::{CoreError, Result};
-use terrain_core::ops::gaussian_blur;
+use terrain_core::ops::{distance_to, gaussian_blur, smoothstep};
 use terrain_core::{
     EvalContext, Grid, GridSpec, NodeKind, NodeSchema, Outputs, ParamDef, PortDef, PortType, Value,
 };
@@ -101,8 +101,265 @@ impl Drainage {
     }
 }
 
+/// Largest value in each cell's 3×3 neighbourhood.
+fn dilate(grid: &Grid) -> Grid {
+    let (w, h) = (grid.spec.width as i64, grid.spec.height as i64);
+    grid.map_indexed(|i, _| {
+        let (x, y) = ((i as i64) % w, (i as i64) / w);
+        let mut v = f32::MIN;
+        for oy in -1..=1 {
+            for ox in -1..=1 {
+                if (0..w).contains(&(x + ox)) && (0..h).contains(&(y + oy)) {
+                    v = v.max(grid.get_clamped(x + ox, y + oy));
+                }
+            }
+        }
+        v
+    })
+}
+
 fn mask(grid: Grid) -> Value {
     Value::Mask(Arc::new(grid.map(|v| v.clamp(0.0, 1.0))))
+}
+
+/// White at the waterline, fading to black `width_m` away from it on both
+/// sides (in the water and on land).
+fn waterline_band(spec: GridSpec, water: &[bool], width_m: f64) -> Grid {
+    if !water.contains(&true) {
+        return Grid::filled(spec, 0.0);
+    }
+    let land: Vec<bool> = water.iter().map(|w| !w).collect();
+    let to_water = distance_to(spec, water);
+    let to_land = distance_to(spec, &land);
+    let width = width_m.max(1.0e-3) as f32;
+    Grid::from_fn_indexed(spec, |i, _, _| {
+        let d = if water[i] {
+            to_land.data[i]
+        } else {
+            to_water.data[i]
+        };
+        1.0 - smoothstep(0.0, width, d)
+    })
+}
+
+/// A Heightfield output.
+fn heightfield(grid: Grid) -> Value {
+    Value::Heightfield(Arc::new(grid))
+}
+
+// ---- Lakes ------------------------------------------------------------------
+
+/// Fill the terrain's depressions with water up to where each would spill.
+pub struct Lakes {
+    schema: NodeSchema,
+}
+
+impl Default for Lakes {
+    fn default() -> Self {
+        Self {
+            schema: NodeSchema {
+                type_id: "simulate.lakes".into(),
+                type_version: 1,
+                label: "Lakes".into(),
+                category: "Simulate".into(),
+                description:
+                    "Fills hollows with water up to the level where each would overflow. Height is the \
+                              lake bed (flattened by sediment), Water surface the lake level (the ground \
+                              elsewhere), Lakes is white on water and Shore along the waterline."
+                        .into(),
+                inputs: vec![PortDef::new("in", "Terrain", PortType::Heightfield)],
+                outputs: vec![
+                    PortDef::new("height", "Height", PortType::Heightfield),
+                    PortDef::new("water_surface", "Water surface", PortType::Heightfield),
+                    PortDef::new("lakes", "Lakes", PortType::Mask),
+                    PortDef::new("shore", "Shore", PortType::Mask),
+                ],
+                params: vec![
+                    ParamDef::metres("min_depth_m", "Min depth", 1.0, 0.0, 1000.0)
+                        .describe("Hollows shallower than this at their deepest point stay dry."),
+                    ParamDef::float("min_area_m2", "Min area", 5000.0, 0.0, 1.0e9)
+                        .unit("m²")
+                        .describe("Lakes smaller than this stay dry, so puddles don't clutter the map."),
+                    ParamDef::float("infill", "Sediment infill", 0.3, 0.0, 1.0).describe(
+                        "Share of each lake's depth filled with sediment, giving it a flat floor. \
+                         0 keeps the original bed; 1 fills the lake to its surface.",
+                    ),
+                    ParamDef::metres("shore_width_m", "Shore width", 30.0, 0.0, 10_000.0)
+                        .describe("Width of the Shore mask on each side of the waterline, in metres."),
+                    detail_param(8.0),
+                ],
+                gpu: false,
+            },
+        }
+    }
+}
+
+/// One lake on the drainage grid.
+struct Lake {
+    level: f64,
+    depth: f64,
+}
+
+/// Lakes on the drainage grid: the lake id of every cell (or `usize::MAX`),
+/// grown by one cell so the waterline can be found at full resolution.
+fn find_lakes(
+    heights: &[f64],
+    filled: &[f64],
+    w: usize,
+    ht: usize,
+    cell_area: f64,
+    min_depth: f64,
+    min_area: f64,
+) -> (Vec<usize>, Vec<Lake>) {
+    const NONE: usize = usize::MAX;
+    let n = heights.len();
+    let flooded = |i: usize| filled[i] > heights[i];
+    let mut id = vec![NONE; n];
+    let mut lakes = Vec::new();
+    let mut queue = Vec::new();
+    // Connected flooded cells at the same level form one lake (8-neighbour),
+    // found in index order so ids are deterministic.
+    for start in 0..n {
+        if id[start] != NONE || !flooded(start) {
+            continue;
+        }
+        let this = lakes.len();
+        let level = filled[start];
+        let (mut count, mut depth) = (0usize, 0.0f64);
+        id[start] = this;
+        queue.push(start);
+        while let Some(c) = queue.pop() {
+            count += 1;
+            depth = depth.max(level - heights[c]);
+            let (cx, cy) = ((c % w) as i64, (c / w) as i64);
+            for (ox, oy) in hydro::D8 {
+                let (x, y) = (cx + ox, cy + oy);
+                if x < 0 || y < 0 || x >= w as i64 || y >= ht as i64 {
+                    continue;
+                }
+                let j = y as usize * w + x as usize;
+                if id[j] == NONE && flooded(j) && filled[j] == level {
+                    id[j] = this;
+                    queue.push(j);
+                }
+            }
+        }
+        lakes.push(Lake { level, depth });
+        if depth < min_depth || count as f64 * cell_area < min_area {
+            lakes[this].depth = -1.0; // Too small: dropped below.
+        }
+    }
+    for v in id.iter_mut() {
+        if *v != NONE && lakes[*v].depth < 0.0 {
+            *v = NONE;
+        }
+    }
+    // Grow by one cell (towards the higher lake where two meet).
+    let grown: Vec<usize> = (0..n)
+        .into_par_iter()
+        .map(|i| {
+            if id[i] != NONE {
+                return id[i];
+            }
+            let (cx, cy) = ((i % w) as i64, (i / w) as i64);
+            let mut best = NONE;
+            for (ox, oy) in hydro::D8 {
+                let (x, y) = (cx + ox, cy + oy);
+                if x < 0 || y < 0 || x >= w as i64 || y >= ht as i64 {
+                    continue;
+                }
+                let j = id[y as usize * w + x as usize];
+                if j != NONE && (best == NONE || lakes[j].level > lakes[best].level) {
+                    best = j;
+                }
+            }
+            best
+        })
+        .collect();
+    (grown, lakes)
+}
+
+impl NodeKind for Lakes {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let t = terrain(ctx)?;
+        ctx.report_progress(0.0);
+        let d = Drainage::new(ctx, t);
+        let (w, ht) = d.size();
+        let [dx, dy] = d.spec.cell_size_m();
+        let filled = hydro::fill_depressions(&d.heights, w, ht);
+        check_cancel(ctx)?;
+        ctx.report_progress(0.5);
+        let (ids, lakes) = find_lakes(
+            &d.heights,
+            &filled,
+            w,
+            ht,
+            dx * dy,
+            ctx.f64("min_depth_m"),
+            ctx.f64("min_area_m2"),
+        );
+        check_cancel(ctx)?;
+
+        // Lake id at full resolution: nearest drainage cell.
+        let id_grid = Grid {
+            spec: d.spec,
+            data: ids
+                .iter()
+                .map(|&i| if i == usize::MAX { -1.0 } else { i as f32 })
+                .collect(),
+        };
+        let infill = ctx.f64("infill");
+        let n = ctx.spec.len();
+        let mut bed = vec![0.0f32; n];
+        let mut surface = vec![0.0f32; n];
+        let mut water = vec![false; n];
+        let mut lake_mask = vec![0.0f32; n];
+        let spec = ctx.spec;
+        let rows = bed
+            .par_chunks_mut(spec.width as usize)
+            .zip(surface.par_chunks_mut(spec.width as usize))
+            .zip(water.par_chunks_mut(spec.width as usize))
+            .zip(lake_mask.par_chunks_mut(spec.width as usize));
+        rows.enumerate().for_each(|(j, (((bed, surface), water), mask))| {
+            let y = spec.y_m(j as u32);
+            for i in 0..bed.len() {
+                let h = t.data[j * spec.width as usize + i] as f64;
+                let x = spec.x_m(i as u32);
+                let id = sample_nearest_m(&id_grid, x, y);
+                let (mut b, mut s, mut m) = (h, h, 0.0);
+                if id >= 0.0 {
+                    let lake = &lakes[id as usize];
+                    if lake.level > h {
+                        b = h.max(lake.level - (1.0 - infill) * lake.depth);
+                        s = lake.level;
+                        // Soft only over the last 10 cm, so shallow edges stay water.
+                        m = ((lake.level - h) / 0.1).min(1.0);
+                    }
+                }
+                bed[i] = b as f32;
+                surface[i] = s as f32;
+                water[i] = m >= 0.5;
+                mask[i] = m as f32;
+            }
+        });
+        let shore = waterline_band(spec, &water, ctx.f64("shore_width_m"));
+        ctx.report_progress(1.0);
+        Ok(Outputs::from([
+            ("height".into(), heightfield(Grid { spec, data: bed })),
+            ("water_surface".into(), heightfield(Grid { spec, data: surface })),
+            (
+                "lakes".into(),
+                mask(Grid {
+                    spec,
+                    data: lake_mask,
+                }),
+            ),
+            ("shore".into(), mask(shore)),
+        ]))
+    }
 }
 
 // ---- Flow -------------------------------------------------------------------
@@ -316,9 +573,9 @@ impl NodeKind for Flow {
                 .map(|&a| log_mask(a, FLOW_LO_M2, FLOW_HI_M2))
                 .collect(),
         };
-        // Streams are about one drainage cell wide: widen to two so they
-        // resample cleanly.
-        let flow = gaussian_blur(&flow, d.spec.cell_size_m()[0]);
+        // Streams are one drainage cell wide: widen them to about three,
+        // keeping their brightness, so they resample cleanly.
+        let flow = gaussian_blur(&dilate(&flow), 0.5 * d.spec.cell_size_m()[0]);
         let outputs = Outputs::from([
             ("accumulation".into(), mask(d.to_output(ctx, flow.data, true))),
             (

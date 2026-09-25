@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use terrain_core::{EvalContext, Grid, GridSpec, NodeKind, Outputs, ParamValue, Value, World};
-use terrain_nodes::water::Flow;
+use terrain_nodes::water::{Flow, Lakes};
 
 fn world() -> World {
     World {
@@ -48,7 +48,7 @@ fn bits(g: &Grid) -> Vec<u32> {
 }
 
 fn water_nodes() -> Vec<Box<dyn NodeKind>> {
-    vec![Box::new(Flow::default())]
+    vec![Box::new(Flow::default()), Box::new(Lakes::default())]
 }
 
 #[test]
@@ -96,11 +96,13 @@ fn flow_is_bright_in_valleys_dark_on_ridges_and_points_downhill() {
         );
         let flow = out["accumulation"].grid();
         // Column 32 is x = 256 (a valley floor), column 64 the ridge at x = 512.
-        let floor = (10..60).map(|j| flow.get(32, j)).sum::<f32>() / 50.0;
+        // The stream wanders a few metres around the floor's centre line.
+        let peak = |j: u32, i: u32| (i - 4..=i + 4).map(|i| flow.get(i, j)).fold(0.0f32, f32::max);
+        let floor = (10..60).map(|j| peak(j, 32)).sum::<f32>() / 50.0;
         let ridge = (10..60).map(|j| flow.get(64, j)).sum::<f32>() / 50.0;
         assert!(floor > ridge + 0.3, "{method}: floor {floor}, ridge {ridge}");
         // Flow increases downstream (towards y = 0) along the valley floor.
-        assert!(flow.get(32, 20) > flow.get(32, 100), "{method}");
+        assert!(peak(20, 32) > peak(100, 32), "{method}");
 
         // Down the valley floor water runs towards -y: about 270°.
         let dir = out["direction"].grid();
@@ -135,4 +137,61 @@ fn a_closed_pit_fills_and_spills_instead_of_stopping_the_flow() {
     let below = (44..53).map(|i| flow.get(i, 20)).fold(0.0f32, f32::max);
     let beside = (4..13).map(|i| flow.get(i, 20)).fold(0.0f32, f32::max);
     assert!(below > beside, "below {below}, beside {beside}");
+}
+
+/// A round bowl in gently sloping ground: its rim is lowest on the downhill
+/// (y = 0) side, where the lake spills.
+fn bowl(res: u32) -> Grid {
+    Grid::from_fn(spec(res), |x, y| {
+        let r2 = ((x - 512.0) / 150.0).powi(2) + ((y - 512.0) / 150.0).powi(2);
+        (300.0 + y * 0.05 - 40.0 * libm::exp(-r2)) as f32
+    })
+}
+
+#[test]
+fn a_hollow_fills_to_its_spill_level_with_a_flat_surface() {
+    let g = bowl(129);
+    let out = run(&Lakes::default(), &g, &[("detail_m", ParamValue::Float(8.0))]);
+    let lakes = out["lakes"].grid();
+    let surface = out["water_surface"].grid();
+    let bed = out["height"].grid();
+    // The centre is water, far corners are dry.
+    assert_eq!(lakes.get(64, 64), 1.0);
+    assert_eq!(lakes.get(5, 120), 0.0);
+    // One flat level across the lake, above the original ground and bed.
+    let level = surface.get(64, 64);
+    for (i, j) in [(60, 60), (70, 66), (64, 72)] {
+        assert_eq!(surface.get(i, j), level);
+        assert!(g.get(i, j) < level && bed.get(i, j) < level);
+    }
+    // Sediment raised the deepest point, never lowered anything.
+    assert!(bed.get(64, 64) > g.get(64, 64));
+    assert!(bed.data.iter().zip(&g.data).all(|(b, h)| b >= h));
+    // Dry ground is unchanged and its surface is the ground.
+    assert_eq!(bed.get(5, 120), g.get(5, 120));
+    assert_eq!(surface.get(5, 120), g.get(5, 120));
+    // The shore is brightest around the waterline, dark far from it.
+    let shore = out["shore"].grid();
+    assert_eq!(shore.get(5, 120), 0.0);
+    assert!(shore.data.iter().any(|v| *v > 0.8));
+}
+
+#[test]
+fn small_or_shallow_hollows_stay_dry_and_edge_hollows_drain() {
+    let g = bowl(129);
+    for params in [
+        vec![("min_area_m2", ParamValue::Float(1.0e7))],
+        vec![("min_depth_m", ParamValue::Float(100.0))],
+    ] {
+        let out = run(&Lakes::default(), &g, &params);
+        assert!(out["lakes"].grid().data.iter().all(|v| *v == 0.0));
+        assert_eq!(out["height"].grid().data, g.data);
+    }
+    // A hollow cut by the world's edge is open: water leaves.
+    let open = Grid::from_fn(spec(129), |x, y| {
+        let r2 = ((x - 0.0) / 150.0).powi(2) + ((y - 512.0) / 150.0).powi(2);
+        (300.0 - 40.0 * libm::exp(-r2)) as f32
+    });
+    let out = run(&Lakes::default(), &open, &[]);
+    assert!(out["lakes"].grid().data.iter().all(|v| *v == 0.0));
 }
