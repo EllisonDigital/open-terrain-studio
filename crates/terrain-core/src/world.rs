@@ -39,6 +39,11 @@ impl World {
         self.height_range_m[0] + v * self.height_span()
     }
 
+    /// Centre of the world in metres.
+    pub fn centre(&self) -> [f64; 2] {
+        [self.size_m[0] * 0.5, self.size_m[1] * 0.5]
+    }
+
     /// Check the world is usable. (Negated comparisons are deliberate: they also reject NaN.)
     #[allow(clippy::neg_cmp_op_on_partial_ord)]
     pub fn validate(&self) -> Result<(), String> {

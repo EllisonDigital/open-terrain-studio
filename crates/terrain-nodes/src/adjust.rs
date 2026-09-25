@@ -1,0 +1,377 @@
+//! Adjust nodes: Curve, Clamp, Invert, Terrace, Blur, Sharpen, Transform and
+//! Warp. (Levels lives in `basic.rs`.)
+
+use terrain_core::error::Result;
+use terrain_core::ops::gaussian_blur;
+use terrain_core::seed::derive;
+use terrain_core::{EvalContext, Grid, NodeKind, NodeSchema, Outputs, ParamDef, PortDef, PortType};
+
+use crate::common::{direction, heightfield_out, lerp, seed_param, strength_param};
+use crate::noise::basis::{self, Basis};
+
+fn adjust_schema(type_id: &str, label: &str, description: &str, params: Vec<ParamDef>) -> NodeSchema {
+    NodeSchema {
+        type_id: type_id.into(),
+        type_version: 1,
+        label: label.into(),
+        category: "Adjust".into(),
+        description: description.into(),
+        inputs: vec![PortDef::new("in", "In", PortType::Heightfield)],
+        outputs: vec![PortDef::new("out", "Out", PortType::Heightfield)],
+        params,
+        gpu: false,
+    }
+}
+
+/// Blend `input` towards `effect` by the (drivable) "strength" parameter.
+fn blend_by_strength(ctx: &EvalContext, input: &Grid, effect: Grid) -> Result<Outputs> {
+    let strength = ctx.field("strength");
+    let mut out = effect;
+    for (idx, v) in out.data.iter_mut().enumerate() {
+        *v = lerp(input.data[idx], *v, strength.at(idx));
+    }
+    heightfield_out(out)
+}
+
+// ---- Curve ------------------------------------------------------------------
+
+/// Reshape heights with a response curve.
+pub struct CurveNode {
+    schema: NodeSchema,
+}
+
+impl Default for CurveNode {
+    fn default() -> Self {
+        Self {
+            schema: adjust_schema(
+                "adjust.curve",
+                "Curve",
+                "Reshape heights with a curve. Left = the world's lowest height, right = its highest; \
+                 pull the curve up to raise those heights. Heights outside the world range are clamped.",
+                vec![ParamDef::curve("curve", "Curve"), strength_param()],
+            ),
+        }
+    }
+}
+
+impl NodeKind for CurveNode {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let input = ctx.input_grid("in")?;
+        let curve = ctx.curve("curve");
+        let world = ctx.world;
+        let effect = input.map(|h| {
+            let t = world.normalise(h).clamp(0.0, 1.0) as f64;
+            world.denormalise(curve.eval(t) as f32)
+        });
+        blend_by_strength(ctx, input, effect)
+    }
+}
+
+// ---- Clamp ------------------------------------------------------------------
+
+/// Limit heights to a range.
+pub struct Clamp {
+    schema: NodeSchema,
+}
+
+impl Default for Clamp {
+    fn default() -> Self {
+        Self {
+            schema: adjust_schema(
+                "adjust.clamp",
+                "Clamp",
+                "Cut off heights below Low and above High, leaving flat floors and tops.",
+                vec![
+                    ParamDef::metres("low_m", "Low", 0.0, -10_000.0, 20_000.0),
+                    ParamDef::metres("high_m", "High", 1500.0, -10_000.0, 20_000.0),
+                ],
+            ),
+        }
+    }
+}
+
+impl NodeKind for Clamp {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let input = ctx.input_grid("in")?;
+        let (a, b) = (ctx.f32("low_m"), ctx.f32("high_m"));
+        let (lo, hi) = (a.min(b), a.max(b));
+        heightfield_out(input.map(|h| h.clamp(lo, hi)))
+    }
+}
+
+// ---- Invert -----------------------------------------------------------------
+
+/// Turn the terrain upside down.
+pub struct Invert {
+    schema: NodeSchema,
+}
+
+impl Default for Invert {
+    fn default() -> Self {
+        Self {
+            schema: adjust_schema(
+                "adjust.invert",
+                "Invert",
+                "Turn the terrain upside down: peaks become pits and valleys become ridges.",
+                vec![
+                    ParamDef::choice(
+                        "around",
+                        "Flip within",
+                        "world",
+                        &[
+                            ("world", "World height range"),
+                            ("input", "Input's own range"),
+                            ("pivot", "Mirror at a height"),
+                        ],
+                    ),
+                    ParamDef::metres("pivot_m", "Pivot height", 0.0, -10_000.0, 20_000.0)
+                        .describe("For \"Mirror at a height\": heights are mirrored around this one."),
+                ],
+            ),
+        }
+    }
+}
+
+impl NodeKind for Invert {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let input = ctx.input_grid("in")?;
+        // h' = sum - h: mirror around sum / 2.
+        let sum = match ctx.choice("around").as_str() {
+            "input" => {
+                let (lo, hi) = input.min_max();
+                lo + hi
+            }
+            "pivot" => 2.0 * ctx.f32("pivot_m"),
+            _ => ctx.world.height_range_m[0] + ctx.world.height_range_m[1],
+        };
+        heightfield_out(input.map(|h| sum - h))
+    }
+}
+
+// ---- Terrace ----------------------------------------------------------------
+
+/// Stepped terraces.
+pub struct Terrace {
+    schema: NodeSchema,
+}
+
+impl Default for Terrace {
+    fn default() -> Self {
+        Self {
+            schema: adjust_schema(
+                "adjust.terrace",
+                "Terrace",
+                "Cut the terrain into steps: flat benches with steeper risers between them.",
+                vec![
+                    ParamDef::metres("step_m", "Step height", 120.0, 0.1, 10_000.0)
+                        .describe("Height of each step, in metres."),
+                    ParamDef::float("sharpness", "Sharpness", 0.7, 0.0, 1.0)
+                        .describe("0 = gentle undulation, 1 = flat benches with near-vertical risers."),
+                    ParamDef::metres("offset_m", "Offset", 0.0, -10_000.0, 10_000.0)
+                        .describe("Shift the steps up or down, in metres."),
+                    strength_param(),
+                ],
+            ),
+        }
+    }
+}
+
+impl NodeKind for Terrace {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let input = ctx.input_grid("in")?;
+        let step = ctx.f32("step_m");
+        let offset = ctx.f32("offset_m");
+        // Exponent 1 (no change) .. 12 (flat benches).
+        let k = 1.0 + ctx.f32("sharpness") * 11.0;
+        let effect = input.map(|h| {
+            let s = (h - offset) / step;
+            let f = s.floor();
+            offset + (f + libm::powf(s - f, k)) * step
+        });
+        blend_by_strength(ctx, input, effect)
+    }
+}
+
+// ---- Blur and Sharpen -------------------------------------------------------
+
+/// Gaussian blur.
+pub struct Blur {
+    schema: NodeSchema,
+}
+
+impl Default for Blur {
+    fn default() -> Self {
+        Self {
+            schema: adjust_schema(
+                "adjust.blur",
+                "Blur",
+                "Smooth the terrain. Features smaller than about the radius are smoothed away.",
+                vec![
+                    ParamDef::metres("radius_m", "Radius", 100.0, 0.0, 100_000.0)
+                        .describe("Blur radius in metres (twice the Gaussian's standard deviation)."),
+                    strength_param(),
+                ],
+            ),
+        }
+    }
+}
+
+impl NodeKind for Blur {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let input = ctx.input_grid("in")?;
+        let blurred = gaussian_blur(input, ctx.f64("radius_m") * 0.5);
+        blend_by_strength(ctx, input, blurred)
+    }
+}
+
+/// Unsharp mask.
+pub struct Sharpen {
+    schema: NodeSchema,
+}
+
+impl Default for Sharpen {
+    fn default() -> Self {
+        Self {
+            schema: adjust_schema(
+                "adjust.sharpen",
+                "Sharpen",
+                "Exaggerate detail: bumps smaller than the radius get taller and dips deeper.",
+                vec![
+                    ParamDef::metres("radius_m", "Radius", 200.0, 0.0, 100_000.0)
+                        .describe("Size of the detail to exaggerate, in metres."),
+                    ParamDef::float("amount", "Amount", 1.0, 0.0, 10.0)
+                        .describe("1 = double the detail.")
+                        .drivable(),
+                ],
+            ),
+        }
+    }
+}
+
+impl NodeKind for Sharpen {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let input = ctx.input_grid("in")?;
+        let amount = ctx.field("amount");
+        let blurred = gaussian_blur(input, ctx.f64("radius_m") * 0.5);
+        heightfield_out(input.map_indexed(|idx, h| h + amount.at(idx) * (h - blurred.data[idx])))
+    }
+}
+
+// ---- Transform --------------------------------------------------------------
+
+/// Move, rotate and scale.
+pub struct Transform {
+    schema: NodeSchema,
+}
+
+impl Default for Transform {
+    fn default() -> Self {
+        Self {
+            schema: adjust_schema(
+                "adjust.transform",
+                "Transform",
+                "Move, rotate and scale the terrain around the centre of the world. \
+                 Areas brought in from outside repeat the edge.",
+                vec![
+                    ParamDef::metres("move_x_m", "Move X", 0.0, -1_000_000.0, 1_000_000.0),
+                    ParamDef::metres("move_y_m", "Move Y", 0.0, -1_000_000.0, 1_000_000.0),
+                    ParamDef::float("rotation_deg", "Rotation", 0.0, -360.0, 360.0)
+                        .unit("°")
+                        .describe("Clockwise in the 2D view."),
+                    ParamDef::float("scale", "Scale", 1.0, 0.01, 100.0)
+                        .describe("2 = features twice as large."),
+                    ParamDef::float("height_scale", "Height scale", 1.0, -10.0, 10.0)
+                        .describe("Multiply heights (around the world's lowest height)."),
+                ],
+            ),
+        }
+    }
+}
+
+impl NodeKind for Transform {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let input = ctx.input_grid("in")?;
+        let c = ctx.world.centre();
+        let (mx, my) = (ctx.f64("move_x_m"), ctx.f64("move_y_m"));
+        // Inverse transform: output position -> input position.
+        let (cos, sin) = direction(-ctx.f64("rotation_deg"));
+        let scale = ctx.f64("scale");
+        let hs = ctx.f32("height_scale");
+        let h0 = ctx.world.height_range_m[0];
+        heightfield_out(Grid::from_fn(ctx.spec, |x, y| {
+            let (px, py) = ((x - c[0] - mx) / scale, (y - c[1] - my) / scale);
+            let (sx, sy) = (px * cos - py * sin, px * sin + py * cos);
+            let h = input.sample_bilinear_m(sx + c[0], sy + c[1]);
+            h0 + (h - h0) * hs
+        }))
+    }
+}
+
+// ---- Warp -------------------------------------------------------------------
+
+/// Push the terrain around with noise.
+pub struct Warp {
+    schema: NodeSchema,
+}
+
+impl Default for Warp {
+    fn default() -> Self {
+        Self {
+            schema: adjust_schema(
+                "adjust.warp",
+                "Warp",
+                "Push the terrain around with smooth noise, bending straight lines and regular shapes \
+                 into natural ones.",
+                vec![
+                    ParamDef::metres("size_m", "Size", 1500.0, 1.0, 1_000_000.0)
+                        .describe("Size of the swirls, in metres."),
+                    ParamDef::metres("strength_m", "Strength", 300.0, 0.0, 100_000.0)
+                        .describe("How far the terrain is pushed, in metres.")
+                        .drivable(),
+                    ParamDef::int("octaves", "Octaves", 4, 1, 10).describe("Detail in the swirls."),
+                    seed_param(),
+                ],
+            ),
+        }
+    }
+}
+
+impl NodeKind for Warp {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let input = ctx.input_grid("in")?;
+        let size = ctx.f64("size_m");
+        let strength = ctx.field("strength_m");
+        let octaves = ctx.i64("octaves") as u32;
+        let (sa, sb) = (derive(ctx.seed, 1), derive(ctx.seed, 2));
+        heightfield_out(Grid::from_fn_indexed(ctx.spec, |idx, x, y| {
+            let s = strength.at(idx) as f64;
+            let dx = basis::fbm(Basis::Perlin, x / size, y / size, sa, octaves, 2.0, 0.5);
+            let dy = basis::fbm(Basis::Perlin, x / size, y / size, sb, octaves, 2.0, 0.5);
+            input.sample_bilinear_m(x + dx * s, y + dy * s)
+        }))
+    }
+}

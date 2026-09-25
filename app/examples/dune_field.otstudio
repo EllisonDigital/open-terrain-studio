@@ -1,0 +1,241 @@
+{
+  "format_version": 1,
+  "app_version": "0.2.0",
+  "world": {
+    "size_m": [
+      4096,
+      4096
+    ],
+    "height_range_m": [
+      0,
+      160
+    ],
+    "seed": 9
+  },
+  "next_node_id": 9,
+  "nodes": [
+    {
+      "id": "n_0001",
+      "type": "noise.fbm",
+      "type_version": 1,
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "feature_size_m": 2600,
+        "height_m": 45,
+        "base_m": 10,
+        "octaves": 4,
+        "seed": 3
+      }
+    },
+    {
+      "id": "n_0002",
+      "type": "terrain.dunes",
+      "type_version": 1,
+      "pos": [
+        0,
+        200
+      ],
+      "params": {
+        "angle_deg": 20,
+        "wavelength_m": 360,
+        "height_m": 38,
+        "asymmetry": 0.78,
+        "sinuosity_m": 260,
+        "variation": 0.55,
+        "seed": 1
+      }
+    },
+    {
+      "id": "n_0003",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        280,
+        80
+      ],
+      "params": {
+        "mode": "add"
+      }
+    },
+    {
+      "id": "n_0004",
+      "type": "terrain.dunes",
+      "type_version": 1,
+      "pos": [
+        280,
+        280
+      ],
+      "params": {
+        "angle_deg": 55,
+        "wavelength_m": 70,
+        "height_m": 2.5,
+        "asymmetry": 0.7,
+        "sinuosity_m": 30,
+        "variation": 0.6,
+        "seed": 2
+      }
+    },
+    {
+      "id": "n_0005",
+      "type": "data.slope",
+      "type_version": 1,
+      "pos": [
+        540,
+        380
+      ],
+      "params": {
+        "min_deg": 0,
+        "max_deg": 12,
+        "falloff_deg": 6
+      }
+    },
+    {
+      "id": "n_0006",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        540,
+        120
+      ],
+      "params": {
+        "mode": "add"
+      }
+    },
+    {
+      "id": "n_0007",
+      "type": "adjust.blur",
+      "type_version": 1,
+      "pos": [
+        780,
+        120
+      ],
+      "params": {
+        "radius_m": 6
+      }
+    },
+    {
+      "id": "n_0008",
+      "type": "data.slope",
+      "type_version": 1,
+      "pos": [
+        1020,
+        260
+      ],
+      "params": {
+        "min_deg": 22,
+        "max_deg": 90,
+        "falloff_deg": 4
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": [
+        "n_0001",
+        "out"
+      ],
+      "to": [
+        "n_0003",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0002",
+        "out"
+      ],
+      "to": [
+        "n_0003",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "out"
+      ],
+      "to": [
+        "n_0006",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0004",
+        "out"
+      ],
+      "to": [
+        "n_0006",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "out"
+      ],
+      "to": [
+        "n_0005",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0005",
+        "out"
+      ],
+      "to": [
+        "n_0006",
+        "mask"
+      ]
+    },
+    {
+      "from": [
+        "n_0006",
+        "out"
+      ],
+      "to": [
+        "n_0007",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0007",
+        "out"
+      ],
+      "to": [
+        "n_0008",
+        "in"
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "node": "n_0007",
+      "port": "out",
+      "format": "exr32"
+    },
+    {
+      "node": "n_0007",
+      "port": "out",
+      "format": "png16"
+    },
+    {
+      "node": "n_0008",
+      "port": "out",
+      "format": "png16"
+    }
+  ],
+  "build": {
+    "resolution": 2017,
+    "folder": "output/"
+  },
+  "ui": {
+    "viewed_node": "n_0007",
+    "preview_resolution": 1024
+  }
+}

@@ -517,7 +517,7 @@ dependencies = [
 
 [[package]]
 name = "terrain-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "exr",
  "image",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "terrain-godot"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "godot",
  "serde_json",
@@ -540,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "terrain-nodes"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "exr",
  "image",

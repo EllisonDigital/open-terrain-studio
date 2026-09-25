@@ -1,5 +1,7 @@
 ## Drives the real main window: waits for the first preview, edits a
-## parameter, adds a node, saves, reloads and exports, taking screenshots.
+## parameter, adds a node, saves, reloads and exports, then the v0.2 tools:
+## undo/redo, examples, the 2D map, mask overlays and ports, and Build.
+## Takes screenshots along the way.
 ## Needs a display (or xvfb) and a GPU (or lavapipe):
 ##   xvfb-run godot --path app --script res://tests/ui_test.gd -- <screenshot_dir>
 extends SceneTree
@@ -106,6 +108,118 @@ func run() -> void:
 			break
 	check(main._status_label.text.begins_with("Exported 3 files"), "export: " + main._status_label.text)
 	check(FileAccess.file_exists(out.path_join("build.json")), "build.json written")
+	main._message.hide()
+
+	# ---- v0.2 -----------------------------------------------------------------
+
+	# Undo / redo through the Edit menu path.
+	var before_nodes: int = main.graph.get_nodes().size()
+	var terrace: String = main.graph_panel.add_node_at("adjust.terrace", Vector2(640, 220))
+	check(main.graph.get_nodes().size() == before_nodes + 1, "terrace added")
+	main._on_menu(main.Menu.UNDO)
+	check(main.graph.get_nodes().size() == before_nodes and main.graph_panel.get_node_or_null(NodePath(terrace)) == null, "undo removes it from graph and screen")
+	check(main._status_label.text.begins_with("Undo: Add Terrace"), "status: " + main._status_label.text)
+	main._on_menu(main.Menu.REDO)
+	check(main.graph.get_nodes().size() == before_nodes + 1, "redo adds it back")
+
+	# 100+ undo steps of parameter edits.
+	main._view_node(fbm)
+	var start_seed: int = main.graph.get_nodes().filter(func(n): return n["id"] == fbm)[0]["params"]["seed"]
+	for i in 120:
+		main.project.break_undo_merge()
+		main._on_param_changed(fbm, "seed", 1000 + i)
+	for i in 120:
+		main.project.undo()
+	var seed_now: int = main.graph.get_nodes().filter(func(n): return n["id"] == fbm)[0]["params"]["seed"]
+	check(seed_now == start_seed, "120 undos restore the seed (%d)" % seed_now)
+	for i in 120:
+		main.project.redo()
+	main._undo_redo(false)
+	main._undo_redo(true)
+	seed_now = main.graph.get_nodes().filter(func(n): return n["id"] == fbm)[0]["params"]["seed"]
+	check(seed_now == 1119, "redo 120 steps (%d)" % seed_now)
+	await wait_preview(main)
+
+	# Examples: the three reference landforms.
+	for i in main.EXAMPLES.size():
+		main._open_example(i)
+		check(await wait_preview(main), "example %s previews" % main.EXAMPLES[i][0])
+		check(main.project_path == "" and main.graph.get_nodes().size() >= 8, "example loaded untitled")
+		check(main.project.get_exports().size() >= 2, "example has marked outputs")
+		main._set_view_2d(false)
+		await frames(10)
+		await shot("10_example_%d_3d" % i)
+
+	# 2D map view with a value readout.
+	main._set_view_2d(true)
+	await frames(5)
+	var mv = main.map_view
+	var readout: String = mv.readout_at(mv.size * 0.5)
+	check(readout.contains("height") and readout.contains(" m"), "2D readout: " + readout)
+	check(mv.readout_at(Vector2(-10, -10)) == "", "no readout off the map")
+	await shot("11_map_2d")
+
+	# Masks: shown over the terrain they came from, in 2D and 3D.
+	# The first Slope in the dune example is upstream of its Blur.
+	var slope := ""
+	for n in main.graph.get_nodes():
+		if n["type"] == "data.slope" and slope == "":
+			slope = n["id"]
+	main.graph_panel.select_node(slope)
+	main._view_node(slope)
+	check(await wait_preview(main), "mask preview")
+	check(main._last_preview.get_port_type() == "mask" and main._last_preview.get_base_node_id() != "", "mask has a base terrain")
+	check(main._stats_label.text.contains("mask"), "stats: " + main._stats_label.text)
+	readout = mv.readout_at(mv.size * 0.5)
+	check(readout.contains("mask") and readout.contains("terrain"), "mask readout: " + readout)
+	main._set_view_2d(false)
+	await frames(10)
+	await shot("12_mask_overlay")
+
+	# Mask-driven parameter: expose a port from the inspector.
+	var levels := ""
+	for n in main.graph.get_nodes():
+		if n["type"] == "adjust.blur":
+			levels = n["id"]
+	main.graph_panel.select_node(levels)
+	main._view_node(levels)
+	await wait_preview(main)
+	main.inspector.port_toggled.emit(levels, "strength", true)
+	var gn: GraphNode = main.graph_panel.get_node(NodePath(levels))
+	check(gn.get_child_count() >= 2, "blur node shows the Strength port row")
+	check(main.graph.connect_ports(slope, "out", levels, "p:strength") == "", "slope drives blur strength")
+	main.graph_panel.rebuild()
+	main._on_graph_edited()
+	check(await wait_preview(main), "driven preview")
+	await shot("13_param_port")
+
+	# Curve editor in the inspector.
+	var curve: String = main.graph_panel.add_node_at("adjust.curve", Vector2(900, 400))
+	check(main.graph.connect_ports(levels, "out", curve, "in") == "", "wire curve")
+	main._view_node(curve)
+	await wait_preview(main)
+	main.inspector.param_changed.emit(curve, "curve", PackedVector2Array([Vector2(0, 0), Vector2(0.4, 0.15), Vector2(1, 1)]))
+	check(await wait_preview(main), "curve preview")
+	await frames(3)
+	await shot("14_curve")
+
+	# Build tab: every marked output at once.
+	main.side_tabs.current_tab = main.build_panel.get_index()
+	main.build_panel.refresh()
+	await frames(3)
+	await shot("15_build_tab")
+	var build_out := OS.get_user_data_dir().path_join("ui_build")
+	var marked := 0
+	for e in main.project.get_exports():
+		marked += e["formats"].size()
+	main._start_build(513, build_out)
+	for i in 900:
+		await process_frame
+		if not main.exporter.is_busy():
+			break
+	check(main._status_label.text.begins_with("Exported"), "build: " + main._status_label.text)
+	var info = JSON.parse_string(FileAccess.get_file_as_string(build_out.path_join("build.json")))
+	check(info is Dictionary and info["files"].size() == marked, "build.json lists %d marked files" % marked)
 	main._message.hide()
 
 	print("FAILED: %d" % failures if failures else "ALL PASSED")

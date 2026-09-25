@@ -1,14 +1,17 @@
 use std::path::PathBuf;
 
 use godot::prelude::*;
-use terrain_core::export::{ExportFormat, ExportRequest, export_node};
+use terrain_core::EvalOptions;
+use terrain_core::export::{ExportFormat, ExportRequest, build_marked, export_node};
 
 use crate::jobs::Job;
 use crate::project::TerrainProject;
-use crate::registry;
+use crate::{cache, registry};
 
 /// Writes node outputs to disk (EXR 32-bit, PNG 16-bit, plus build.json) on a
-/// worker thread. Add it to the scene tree; results arrive by signal.
+/// worker thread: one viewed output (`request_export`) or every output marked
+/// for export (`request_build`). Add it to the scene tree; results arrive by
+/// signal.
 #[derive(GodotClass)]
 #[class(base=Node)]
 pub struct TerrainExporter {
@@ -97,7 +100,7 @@ impl TerrainExporter {
             return false;
         }
         self.generation += 1;
-        let snapshot = project.bind().snapshot();
+        let (snapshot, base_dir) = project.bind().snapshot();
         let (node, port, folder) = (
             node_id.to_string(),
             port.to_string(),
@@ -114,8 +117,42 @@ impl TerrainExporter {
                     folder: &folder,
                     formats: &fmts,
                 },
-                Some(cancel),
-                Some(progress),
+                &EvalOptions {
+                    cancel: Some(cancel),
+                    progress: Some(progress),
+                    cache: Some(cache()),
+                    base_dir: base_dir.as_deref(),
+                },
+            )
+            .map_err(|e| e.to_string())
+        }));
+        true
+    }
+
+    /// Build every output marked for export at `resolution` into `folder`
+    /// (relative folders are inside the project's folder). Returns false if an
+    /// export or build is already running.
+    #[func]
+    fn request_build(&mut self, project: Gd<TerrainProject>, resolution: i32, folder: GString) -> bool {
+        if self.job.is_some() {
+            godot_warn!("TerrainExporter: an export is already running");
+            return false;
+        }
+        self.generation += 1;
+        let (snapshot, base_dir) = project.bind().snapshot();
+        let folder = PathBuf::from(folder.to_string());
+        self.job = Some(Job::spawn(self.generation, move |cancel, progress| {
+            build_marked(
+                &snapshot,
+                registry(),
+                resolution.max(2) as u32,
+                &folder,
+                &EvalOptions {
+                    cancel: Some(cancel),
+                    progress: Some(progress),
+                    cache: Some(cache()),
+                    base_dir: base_dir.as_deref(),
+                },
             )
             .map_err(|e| e.to_string())
         }));

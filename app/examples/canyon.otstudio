@@ -1,0 +1,267 @@
+{
+  "format_version": 1,
+  "app_version": "0.2.0",
+  "world": {
+    "size_m": [
+      8192,
+      8192
+    ],
+    "height_range_m": [
+      0,
+      1500
+    ],
+    "seed": 77
+  },
+  "next_node_id": 10,
+  "nodes": [
+    {
+      "id": "n_0001",
+      "type": "noise.fbm",
+      "type_version": 1,
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "feature_size_m": 3500,
+        "height_m": 160,
+        "base_m": 950,
+        "octaves": 5,
+        "seed": 1
+      }
+    },
+    {
+      "id": "n_0002",
+      "type": "adjust.terrace",
+      "type_version": 1,
+      "pos": [
+        260,
+        0
+      ],
+      "params": {
+        "step_m": 45,
+        "sharpness": 0.6,
+        "strength": 0.6
+      }
+    },
+    {
+      "id": "n_0003",
+      "type": "terrain.canyon",
+      "type_version": 1,
+      "pos": [
+        520,
+        0
+      ],
+      "params": {
+        "angle_deg": 20,
+        "depth_m": 720,
+        "width_m": 2500,
+        "floor_width_m": 500,
+        "steps": 4,
+        "meander_m": 1700,
+        "meander_size_m": 4200,
+        "roughness": 0.7,
+        "seed": 4
+      }
+    },
+    {
+      "id": "n_0004",
+      "type": "terrain.plateau",
+      "type_version": 1,
+      "pos": [
+        520,
+        220
+      ],
+      "params": {
+        "radius_m": 380,
+        "height_m": 560,
+        "base_m": 250,
+        "cliff_m": 50,
+        "talus_m": 240,
+        "edge_m": 150,
+        "pos_x_m": 150,
+        "pos_y_m": 250,
+        "seed": 2
+      }
+    },
+    {
+      "id": "n_0005",
+      "type": "terrain.plateau",
+      "type_version": 1,
+      "pos": [
+        520,
+        420
+      ],
+      "params": {
+        "radius_m": 260,
+        "height_m": 430,
+        "base_m": 250,
+        "cliff_m": 40,
+        "talus_m": 200,
+        "edge_m": 120,
+        "pos_x_m": -2350,
+        "pos_y_m": -500,
+        "seed": 6
+      }
+    },
+    {
+      "id": "n_0006",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        780,
+        60
+      ],
+      "params": {
+        "mode": "max"
+      }
+    },
+    {
+      "id": "n_0007",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        1020,
+        60
+      ],
+      "params": {
+        "mode": "max"
+      }
+    },
+    {
+      "id": "n_0008",
+      "type": "adjust.warp",
+      "type_version": 1,
+      "pos": [
+        1260,
+        60
+      ],
+      "params": {
+        "size_m": 700,
+        "strength_m": 70,
+        "seed": 5
+      }
+    },
+    {
+      "id": "n_0009",
+      "type": "data.slope",
+      "type_version": 1,
+      "pos": [
+        1500,
+        220
+      ],
+      "params": {
+        "min_deg": 40,
+        "max_deg": 90,
+        "falloff_deg": 8
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": [
+        "n_0001",
+        "out"
+      ],
+      "to": [
+        "n_0002",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0002",
+        "out"
+      ],
+      "to": [
+        "n_0003",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "out"
+      ],
+      "to": [
+        "n_0006",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0004",
+        "out"
+      ],
+      "to": [
+        "n_0006",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0006",
+        "out"
+      ],
+      "to": [
+        "n_0007",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0005",
+        "out"
+      ],
+      "to": [
+        "n_0007",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0007",
+        "out"
+      ],
+      "to": [
+        "n_0008",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0008",
+        "out"
+      ],
+      "to": [
+        "n_0009",
+        "in"
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "node": "n_0008",
+      "port": "out",
+      "format": "exr32"
+    },
+    {
+      "node": "n_0008",
+      "port": "out",
+      "format": "png16"
+    },
+    {
+      "node": "n_0009",
+      "port": "out",
+      "format": "png16"
+    }
+  ],
+  "build": {
+    "resolution": 2017,
+    "folder": "output/"
+  },
+  "ui": {
+    "viewed_node": "n_0008",
+    "preview_resolution": 1024
+  }
+}

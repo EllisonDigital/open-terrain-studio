@@ -5,7 +5,6 @@
 //! Blender all read heightmaps this way.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
 
 use serde::Serialize;
 
@@ -229,8 +228,40 @@ pub struct ExportRequest<'a> {
     pub node: &'a str,
     pub port: &'a str,
     pub resolution: u32,
+    /// Output folder; relative paths are resolved against `EvalOptions::base_dir`.
     pub folder: &'a Path,
     pub formats: &'a [ExportFormat],
+}
+
+/// File name without extension: `{node}_{output}_{res}`, e.g. `fbm-n_0003_out_2048`.
+fn output_basename(
+    project: &Project,
+    registry: &NodeRegistry,
+    node: &str,
+    port: &str,
+    resolution: u32,
+) -> String {
+    let label = project
+        .graph
+        .node(node)
+        .and_then(|n| registry.schema(&n.type_id))
+        .map(|s| s.label.clone())
+        .unwrap_or_default();
+    format!("{}-{}_{}_{}", sanitise(&label), node, sanitise(port), resolution)
+}
+
+fn resolve_folder(folder: &Path, base_dir: Option<&Path>) -> Result<PathBuf> {
+    if folder.as_os_str().is_empty() {
+        return Err(CoreError::Project("no output folder chosen".into()));
+    }
+    match base_dir {
+        _ if folder.is_absolute() => Ok(folder.to_path_buf()),
+        Some(dir) => Ok(dir.join(folder)),
+        None => Err(CoreError::Project(format!(
+            "the output folder '{}' is relative: save the project first, or choose a full path",
+            folder.display()
+        ))),
+    }
 }
 
 /// Evaluate a node output at build resolution and write it in every requested
@@ -239,55 +270,98 @@ pub fn export_node(
     project: &Project,
     registry: &NodeRegistry,
     req: &ExportRequest,
-    cancel: Option<&AtomicBool>,
-    progress: Option<&(dyn Fn(f32) + Sync)>,
+    opts: &EvalOptions,
 ) -> Result<Vec<PathBuf>> {
-    let spec = GridSpec::full_world(&project.world, req.resolution)?;
-    let outputs = evaluate_node(
-        &project.graph,
-        registry,
-        &project.world,
-        spec,
-        req.node,
-        &EvalOptions { cancel, progress },
-    )?;
-    let value = outputs.get(req.port).ok_or_else(|| CoreError::PortNotFound {
-        node: req.node.into(),
-        port: req.port.into(),
-    })?;
+    let outputs = [(req.node.to_string(), req.port.to_string(), req.formats.to_vec())];
+    write_outputs(project, registry, &outputs, req.resolution, req.folder, opts)
+}
 
-    std::fs::create_dir_all(req.folder)?;
-    let label = project
-        .graph
-        .node(req.node)
-        .and_then(|n| registry.schema(&n.type_id))
-        .map(|s| s.label.clone())
-        .unwrap_or_default();
-    // {node}_{output}_{res}, e.g. "fbm-n_0003_out_2048.exr"
-    let base = format!(
-        "{}-{}_{}_{}",
-        sanitise(&label),
-        req.node,
-        sanitise(req.port),
-        req.resolution
-    );
+/// Build every output marked for export (`project.exports`) at `resolution`
+/// into `folder`, with one `build.json` listing them all. Shared upstream
+/// nodes are computed once when `opts.cache` is set.
+pub fn build_marked(
+    project: &Project,
+    registry: &NodeRegistry,
+    resolution: u32,
+    folder: &Path,
+    opts: &EvalOptions,
+) -> Result<Vec<PathBuf>> {
+    // Group formats by output, keeping the (sorted) mark order.
+    let mut outputs: Vec<(String, String, Vec<ExportFormat>)> = Vec::new();
+    for e in &project.exports {
+        let Some(format) = ExportFormat::parse(&e.format) else {
+            return Err(CoreError::Project(format!(
+                "unknown export format '{}'",
+                e.format
+            )));
+        };
+        match outputs.iter_mut().find(|o| o.0 == e.node && o.1 == e.port) {
+            Some(o) => o.2.push(format),
+            None => outputs.push((e.node.clone(), e.port.clone(), vec![format])),
+        }
+    }
+    if outputs.is_empty() {
+        return Err(CoreError::Project(
+            "nothing is marked for export: mark a node's output in its settings first".into(),
+        ));
+    }
+    write_outputs(project, registry, &outputs, resolution, folder, opts)
+}
 
+fn write_outputs(
+    project: &Project,
+    registry: &NodeRegistry,
+    outputs: &[(String, String, Vec<ExportFormat>)],
+    resolution: u32,
+    folder: &Path,
+    opts: &EvalOptions,
+) -> Result<Vec<PathBuf>> {
+    let spec = GridSpec::full_world(&project.world, resolution)?;
+    let folder = resolve_folder(folder, opts.base_dir)?;
+    // Evaluate everything before writing anything, so a failure leaves no
+    // half-finished build behind.
+    let n = outputs.len() as f32;
+    let mut values = Vec::with_capacity(outputs.len());
+    for (k, (node, port, _)) in outputs.iter().enumerate() {
+        let scaled = |f: f32| {
+            if let Some(p) = opts.progress {
+                p((k as f32 + f) / n);
+            }
+        };
+        let evaluated = evaluate_node(
+            &project.graph,
+            registry,
+            &project.world,
+            spec,
+            node,
+            &EvalOptions {
+                progress: Some(&scaled),
+                ..*opts
+            },
+        )?;
+        let value = evaluated
+            .get(port)
+            .cloned()
+            .ok_or_else(|| CoreError::PortNotFound {
+                node: node.clone(),
+                port: port.clone(),
+            })?;
+        values.push(value);
+    }
+
+    std::fs::create_dir_all(&folder)?;
     let mut written = Vec::new();
     let mut files = Vec::new();
-    for &format in req.formats {
-        let path = req.folder.join(format!("{base}.{}", format.extension()));
-        files.push(write_value(
-            value,
-            &project.world,
-            format,
-            &path,
-            req.node,
-            req.port,
-        )?);
-        written.push(path);
+    for ((node, port, formats), value) in outputs.iter().zip(&values) {
+        let base = output_basename(project, registry, node, port, resolution);
+        for &format in formats {
+            let path = folder.join(format!("{base}.{}", format.extension()));
+            files.push(write_value(value, &project.world, format, &path, node, port)?);
+            written.push(path);
+        }
     }
     let info = BuildInfo::new(&project.world, &spec, files);
-    let info_path = req.folder.join("build.json");
+    let info_path = folder.join("build.json");
     std::fs::write(&info_path, serde_json::to_string_pretty(&info)? + "\n")?;
     written.push(info_path);
     Ok(written)

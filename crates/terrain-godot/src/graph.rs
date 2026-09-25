@@ -6,7 +6,8 @@ use crate::project::{Shared, lock};
 use crate::registry;
 
 /// The node graph of a `TerrainProject`. A live view: every edit goes straight
-/// into the project owned by Rust (Godot never holds the source of truth).
+/// into the project owned by Rust (Godot never holds the source of truth), and
+/// every edit is undoable through the project.
 #[derive(GodotClass)]
 #[class(base=RefCounted, no_init)]
 pub struct TerrainGraph {
@@ -31,13 +32,24 @@ impl TerrainGraph {
     fn schema_dict(schema: &NodeSchema) -> Variant {
         json_to_variant(&serde_json::to_value(schema).unwrap_or_default())
     }
+
+    /// "Mountain" for a node id, for undo labels.
+    fn label_of(&self, id: &str) -> String {
+        lock(&self.shared)
+            .project
+            .graph
+            .node(id)
+            .and_then(|n| registry().schema(&n.type_id))
+            .map(|s| s.label.clone())
+            .unwrap_or_else(|| "node".into())
+    }
 }
 
 #[godot_api]
 impl TerrainGraph {
     /// Every available node type: type_id, label, category, description,
     /// inputs, outputs and params (key, label, kind, min, max, step, options,
-    /// default, unit, description).
+    /// filters, default, unit, description, drivable).
     #[func]
     fn get_node_types(&self) -> VarArray {
         let mut arr = VarArray::new();
@@ -57,7 +69,10 @@ impl TerrainGraph {
     }
 
     /// All nodes: id, type, label, category, pos (Vector2), known (bool),
-    /// inputs, outputs, params (effective values, defaults filled in).
+    /// inputs (including exposed parameter ports, which have a "param" key),
+    /// outputs, params (effective values, defaults filled in), exposed
+    /// (PackedStringArray of parameter keys) and exported (PackedStringArray of
+    /// output ports marked for export).
     #[func]
     fn get_nodes(&self) -> VarArray {
         let s = lock(&self.shared);
@@ -73,9 +88,10 @@ impl TerrainGraph {
                     put(&mut d, "known", true);
                     put(&mut d, "label", GString::from(schema.label.as_str()));
                     put(&mut d, "category", GString::from(schema.category.as_str()));
-                    let full = serde_json::to_value(schema).unwrap_or_default();
-                    d.set(&"inputs".to_variant(), &json_to_variant(&full["inputs"]));
-                    d.set(&"outputs".to_variant(), &json_to_variant(&full["outputs"]));
+                    let inputs = serde_json::to_value(schema.input_ports(&node.exposed)).unwrap_or_default();
+                    let outputs = serde_json::to_value(&schema.outputs).unwrap_or_default();
+                    put(&mut d, "inputs", json_to_variant(&inputs));
+                    put(&mut d, "outputs", json_to_variant(&outputs));
                     for def in &schema.params {
                         let v = node
                             .params
@@ -104,6 +120,30 @@ impl TerrainGraph {
                 }
             }
             put(&mut d, "params", params);
+            put(
+                &mut d,
+                "exposed",
+                node.exposed
+                    .iter()
+                    .map(|k| GString::from(k.as_str()))
+                    .collect::<PackedStringArray>(),
+            );
+            let mut exported: Vec<&str> = s
+                .project
+                .exports
+                .iter()
+                .filter(|e| e.node == node.id)
+                .map(|e| e.port.as_str())
+                .collect();
+            exported.dedup();
+            put(
+                &mut d,
+                "exported",
+                exported
+                    .into_iter()
+                    .map(GString::from)
+                    .collect::<PackedStringArray>(),
+            );
             arr.push(&d.to_variant());
         }
         arr
@@ -133,17 +173,14 @@ impl TerrainGraph {
     /// Add a node. Returns its id, or "" on error.
     #[func]
     fn add_node(&mut self, type_id: GString, pos: Vector2) -> GString {
-        let result = {
-            let mut s = lock(&self.shared);
-            let r = s
-                .project
-                .graph
-                .add_node(registry(), &type_id.to_string(), [pos.x, pos.y]);
-            if r.is_ok() {
-                s.modified = true;
-            }
-            r
-        };
+        let type_id = type_id.to_string();
+        let label = registry()
+            .schema(&type_id)
+            .map(|s| format!("Add {}", s.label))
+            .unwrap_or_default();
+        let result = lock(&self.shared).edit(&label, None, |p| {
+            p.graph.add_node(registry(), &type_id, [pos.x, pos.y])
+        });
         match result {
             Ok(id) => id.as_str().into(),
             Err(e) => {
@@ -153,34 +190,29 @@ impl TerrainGraph {
         }
     }
 
+    /// Remove a node, its links and its export marks.
     #[func]
     fn remove_node(&mut self, id: GString) -> bool {
-        let result = {
-            let mut s = lock(&self.shared);
-            let r = s.project.graph.remove_node(&id.to_string());
-            if r.is_ok() {
-                s.modified = true;
-            }
-            r
-        };
+        let id = id.to_string();
+        let label = format!("Delete {}", self.label_of(&id));
+        let result = lock(&self.shared).edit(&label, None, |p| p.remove_node(&id));
         result.map_err(|e| self.fail(e.to_string())).is_ok()
     }
 
     /// Connect an output to an input. Returns "" on success, otherwise the reason.
     #[func]
     fn connect_ports(&mut self, from: GString, from_port: GString, to: GString, to_port: GString) -> GString {
-        let mut s = lock(&self.shared);
-        match s.project.graph.connect(
-            registry(),
-            &from.to_string(),
-            &from_port.to_string(),
-            &to.to_string(),
-            &to_port.to_string(),
-        ) {
-            Ok(()) => {
-                s.modified = true;
-                GString::new()
-            }
+        let result = lock(&self.shared).edit("Connect", None, |p| {
+            p.graph.connect(
+                registry(),
+                &from.to_string(),
+                &from_port.to_string(),
+                &to.to_string(),
+                &to_port.to_string(),
+            )
+        });
+        match result {
+            Ok(()) => GString::new(),
             Err(e) => e.to_string().as_str().into(),
         }
     }
@@ -188,30 +220,36 @@ impl TerrainGraph {
     /// Remove the link into an input, if any.
     #[func]
     fn disconnect_input(&mut self, to: GString, to_port: GString) {
-        let mut s = lock(&self.shared);
-        s.project.graph.disconnect(&to.to_string(), &to_port.to_string());
-        s.modified = true;
+        let _ = lock(&self.shared).edit("Disconnect", None, |p| {
+            p.graph.disconnect(&to.to_string(), &to_port.to_string());
+            Ok(())
+        });
     }
 
     /// Set a parameter. Returns the value actually stored (clamped to its
-    /// range), or null on error.
+    /// range), or null on error. Rapid changes to the same parameter (e.g. a
+    /// slider drag) merge into one undo step.
     #[func]
     fn set_param(&mut self, id: GString, key: GString, value: Variant) -> Variant {
         let Some(pv) = variant_to_param(&value) else {
             self.fail(format!("unsupported value type for '{key}'"));
             return Variant::nil();
         };
-        let result = {
-            let mut s = lock(&self.shared);
-            let r = s
-                .project
+        let (id, key) = (id.to_string(), key.to_string());
+        let label = {
+            let s = lock(&self.shared);
+            s.project
                 .graph
-                .set_param(registry(), &id.to_string(), &key.to_string(), pv);
-            if r.is_ok() {
-                s.modified = true;
-            }
-            r
+                .node(&id)
+                .and_then(|n| registry().schema(&n.type_id))
+                .and_then(|sc| sc.param(&key))
+                .map(|d| format!("Set {}", d.label))
+                .unwrap_or_else(|| format!("Set {key}"))
         };
+        let merge = format!("param:{id}:{key}");
+        let result = lock(&self.shared).edit(&label, Some(&merge), |p| {
+            p.graph.set_param(registry(), &id, &key, pv)
+        });
         match result {
             Ok(v) => param_to_variant(&v),
             Err(e) => {
@@ -221,16 +259,59 @@ impl TerrainGraph {
         }
     }
 
+    /// Show or hide a drivable parameter as an input port ("p:<key>").
+    #[func]
+    fn set_param_exposed(&mut self, id: GString, key: GString, exposed: bool) -> bool {
+        let label = if exposed {
+            "Show parameter port"
+        } else {
+            "Hide parameter port"
+        };
+        let result = lock(&self.shared).edit(label, None, |p| {
+            p.graph
+                .set_exposed(registry(), &id.to_string(), &key.to_string(), exposed)
+        });
+        result.map_err(|e| self.fail(e.to_string())).is_ok()
+    }
+
     #[func]
     fn set_node_position(&mut self, id: GString, pos: Vector2) {
-        let mut s = lock(&self.shared);
-        if s.project
+        let id = id.to_string();
+        let merge = format!("move:{id}");
+        let _ = lock(&self.shared).edit("Move node", Some(&merge), |p| {
+            p.graph.set_position(&id, [pos.x, pos.y])
+        });
+    }
+
+    /// The nearest heightfield output upstream of a node, as
+    /// {"node": id, "port": key}; empty if there is none.
+    #[func]
+    fn get_base_heightfield(&self, id: GString) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        if let Some((node, port)) = lock(&self.shared)
+            .project
             .graph
-            .set_position(&id.to_string(), [pos.x, pos.y])
-            .is_ok()
+            .base_heightfield(registry(), &id.to_string())
         {
-            s.modified = true;
+            put(&mut d, "node", GString::from(node.as_str()));
+            put(&mut d, "port", GString::from(port.as_str()));
         }
+        d
+    }
+
+    /// Evaluate a curve (as stored by a Curve parameter) at `samples` evenly
+    /// spaced x values from 0 to 1, exactly as the engine does. Empty if the
+    /// points are invalid.
+    #[func]
+    fn eval_curve(points: PackedVector2Array, samples: i32) -> PackedFloat32Array {
+        let value = variant_to_param(&points.to_variant());
+        let Some(curve) = value.and_then(|v| terrain_core::Curve::parse(&v).ok()) else {
+            return PackedFloat32Array::new();
+        };
+        let n = samples.max(2);
+        (0..n)
+            .map(|i| curve.eval(i as f64 / (n - 1) as f64) as f32)
+            .collect()
     }
 
     #[func]

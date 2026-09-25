@@ -17,6 +17,11 @@ uniform float height_min = 0.0;
 uniform float height_max = 2400.0;
 // 0 = natural, 1 = clay, 2 = height ramp.
 uniform int view_mode = 0;
+// Mask overlay (ARCHITECTURE.md §7): a 0..1 mask drawn as a false-colour
+// tint over the terrain, e.g. a Slope mask over the terrain it came from.
+uniform sampler2D overlay_tex : filter_linear, repeat_disable;
+uniform bool show_overlay = false;
+uniform float overlay_opacity = 0.85;
 
 varying vec2 terrain_uv;
 varying float height_m;
@@ -30,6 +35,13 @@ void vertex() {
 	terrain_uv = VERTEX.xz / world_size + 0.5;
 	height_m = height_at(terrain_uv);
 	VERTEX.y = height_m * exaggeration;
+}
+
+// Dark blue (0) -> teal -> yellow -> red (1), in linear albedo.
+vec3 mask_ramp(float m) {
+	vec3 c = mix(vec3(0.02, 0.03, 0.12), vec3(0.02, 0.35, 0.40), smoothstep(0.0, 0.35, m));
+	c = mix(c, vec3(0.80, 0.70, 0.08), smoothstep(0.35, 0.7, m));
+	return mix(c, vec3(0.85, 0.12, 0.05), smoothstep(0.7, 1.0, m));
 }
 
 vec3 height_ramp(float t) {
@@ -69,6 +81,10 @@ void fragment() {
 		albedo = mix(low, high, smoothstep(0.2, 0.7, t));
 		albedo = mix(albedo, rock, smoothstep(0.22, 0.45, slope));
 		albedo = mix(albedo, snow, smoothstep(0.78, 0.9, t) * (1.0 - smoothstep(0.25, 0.45, slope)));
+	}
+	if (show_overlay) {
+		float m = clamp(texture(overlay_tex, terrain_uv).r, 0.0, 1.0);
+		albedo = mix(vec3(0.30, 0.29, 0.28), mask_ramp(m), overlay_opacity);
 	}
 	ALBEDO = albedo;
 	ROUGHNESS = 0.92;

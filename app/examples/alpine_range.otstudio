@@ -1,0 +1,414 @@
+{
+  "format_version": 1,
+  "app_version": "0.2.0",
+  "world": {
+    "size_m": [
+      8192,
+      8192
+    ],
+    "height_range_m": [
+      0,
+      3000
+    ],
+    "seed": 2024
+  },
+  "next_node_id": 15,
+  "nodes": [
+    {
+      "id": "n_0001",
+      "type": "noise.fbm",
+      "type_version": 1,
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "feature_size_m": 6500,
+        "height_m": 1500,
+        "octaves": 4,
+        "gain": 0.45,
+        "seed": 8
+      }
+    },
+    {
+      "id": "n_0002",
+      "type": "terrain.ridge",
+      "type_version": 1,
+      "pos": [
+        0,
+        200
+      ],
+      "params": {
+        "angle_deg": 25,
+        "length_m": 7800,
+        "width_m": 2800,
+        "height_m": 1100,
+        "meander_m": 800,
+        "ridges": 0.6,
+        "seed": 3
+      }
+    },
+    {
+      "id": "n_0003",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        260,
+        80
+      ],
+      "params": {
+        "mode": "max"
+      }
+    },
+    {
+      "id": "n_0004",
+      "type": "data.height_mask",
+      "type_version": 1,
+      "pos": [
+        500,
+        240
+      ],
+      "params": {
+        "low_m": 800,
+        "high_m": 5000,
+        "falloff_m": 600
+      }
+    },
+    {
+      "id": "n_0005",
+      "type": "noise.ridged",
+      "type_version": 1,
+      "pos": [
+        500,
+        400
+      ],
+      "params": {
+        "feature_size_m": 3800,
+        "height_m": 1000,
+        "octaves": 8,
+        "gain": 0.45,
+        "seed": 11
+      }
+    },
+    {
+      "id": "n_0006",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        760,
+        80
+      ],
+      "params": {
+        "mode": "add",
+        "ratio": 1.0
+      }
+    },
+    {
+      "id": "n_0007",
+      "type": "terrain.mountain",
+      "type_version": 1,
+      "pos": [
+        760,
+        300
+      ],
+      "params": {
+        "radius_m": 2300,
+        "height_m": 2300,
+        "pos_x_m": 1100,
+        "pos_y_m": -700,
+        "ridges": 0.75,
+        "seed": 5
+      }
+    },
+    {
+      "id": "n_0008",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        1000,
+        120
+      ],
+      "params": {
+        "mode": "max"
+      }
+    },
+    {
+      "id": "n_0009",
+      "type": "adjust.warp",
+      "type_version": 1,
+      "pos": [
+        1240,
+        120
+      ],
+      "params": {
+        "size_m": 2000,
+        "strength_m": 200,
+        "seed": 2
+      }
+    },
+    {
+      "id": "n_000a",
+      "type": "adjust.curve",
+      "type_version": 1,
+      "pos": [
+        1480,
+        120
+      ],
+      "params": {
+        "curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.3,
+            0.12
+          ],
+          [
+            0.6,
+            0.5
+          ],
+          [
+            1,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "id": "n_000b",
+      "type": "data.curvature",
+      "type_version": 1,
+      "pos": [
+        1480,
+        320
+      ],
+      "params": {
+        "mode": "convex",
+        "radius_m": 300,
+        "range_m": 40
+      }
+    },
+    {
+      "id": "n_000c",
+      "type": "adjust.sharpen",
+      "type_version": 1,
+      "pos": [
+        1720,
+        120
+      ],
+      "params": {
+        "radius_m": 250,
+        "amount": 0.6
+      },
+      "exposed": [
+        "amount"
+      ]
+    },
+    {
+      "id": "n_000d",
+      "type": "adjust.levels",
+      "type_version": 1,
+      "pos": [
+        1960,
+        120
+      ],
+      "params": {
+        "auto_input": true,
+        "world_output": true,
+        "gamma": 1.1
+      }
+    },
+    {
+      "id": "n_000e",
+      "type": "data.slope",
+      "type_version": 1,
+      "pos": [
+        2200,
+        260
+      ],
+      "params": {
+        "min_deg": 35,
+        "max_deg": 90,
+        "falloff_deg": 6
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": [
+        "n_0001",
+        "out"
+      ],
+      "to": [
+        "n_0003",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0002",
+        "out"
+      ],
+      "to": [
+        "n_0003",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "out"
+      ],
+      "to": [
+        "n_0004",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "out"
+      ],
+      "to": [
+        "n_0006",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0005",
+        "out"
+      ],
+      "to": [
+        "n_0006",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0004",
+        "out"
+      ],
+      "to": [
+        "n_0006",
+        "mask"
+      ]
+    },
+    {
+      "from": [
+        "n_0006",
+        "out"
+      ],
+      "to": [
+        "n_0008",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0007",
+        "out"
+      ],
+      "to": [
+        "n_0008",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0008",
+        "out"
+      ],
+      "to": [
+        "n_0009",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0009",
+        "out"
+      ],
+      "to": [
+        "n_000a",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_000a",
+        "out"
+      ],
+      "to": [
+        "n_000b",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_000a",
+        "out"
+      ],
+      "to": [
+        "n_000c",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_000b",
+        "out"
+      ],
+      "to": [
+        "n_000c",
+        "p:amount"
+      ]
+    },
+    {
+      "from": [
+        "n_000c",
+        "out"
+      ],
+      "to": [
+        "n_000d",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_000d",
+        "out"
+      ],
+      "to": [
+        "n_000e",
+        "in"
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "node": "n_000d",
+      "port": "out",
+      "format": "exr32"
+    },
+    {
+      "node": "n_000d",
+      "port": "out",
+      "format": "png16"
+    },
+    {
+      "node": "n_000e",
+      "port": "out",
+      "format": "png16"
+    }
+  ],
+  "build": {
+    "resolution": 2017,
+    "folder": "output/"
+  },
+  "ui": {
+    "viewed_node": "n_000d",
+    "preview_resolution": 1024
+  }
+}

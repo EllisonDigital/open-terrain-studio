@@ -107,6 +107,35 @@ impl Grid {
         Self { spec, data }
     }
 
+    /// Like [`Grid::from_fn`], but `f` also gets the flat sample index (for
+    /// reading other grids or per-cell parameters at the same sample).
+    pub fn from_fn_indexed<F>(spec: GridSpec, f: F) -> Self
+    where
+        F: Fn(usize, f64, f64) -> f32 + Sync,
+    {
+        let w = spec.width as usize;
+        let mut data = vec![0.0f32; spec.len()];
+        data.par_chunks_mut(w).enumerate().for_each(|(j, row)| {
+            let y = spec.y_m(j as u32);
+            for (i, v) in row.iter_mut().enumerate() {
+                *v = f(j * w + i, spec.x_m(i as u32), y);
+            }
+        });
+        Self { spec, data }
+    }
+
+    /// Apply `f(index, value)` to every sample, in parallel.
+    pub fn map_indexed<F>(&self, f: F) -> Self
+    where
+        F: Fn(usize, f32) -> f32 + Sync,
+    {
+        let data = self.data.par_iter().enumerate().map(|(i, &v)| f(i, v)).collect();
+        Self {
+            spec: self.spec,
+            data,
+        }
+    }
+
     /// Apply `f` to every sample, in parallel.
     pub fn map<F>(&self, f: F) -> Self
     where

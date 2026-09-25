@@ -2,7 +2,10 @@
 
 How to bring an OpenTerrainStudio heightmap into Blender, Unreal Engine and Godot at the right scale.
 
-**File → Export Viewed Node** writes, for the node you are viewing:
+**File → Export Viewed Node** writes the node you are viewing. To export several outputs at once (say a
+heightmap and a slope mask), tick a format under *Export* in each node's settings and press *Build* in the
+**Build** tab (<kbd>Ctrl</kbd>+<kbd>B</kbd>): every marked output is written at the build resolution, with one
+`build.json` listing them all. Masks are written as 0..1 (EXR) or 0..65535 (PNG). For each output you get:
 
 | File | Contents |
 | --- | --- |

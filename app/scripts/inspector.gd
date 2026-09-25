@@ -2,18 +2,29 @@
 ## needs no UI code. Shows world settings when no node is selected.
 extends ScrollContainer
 
+const CurveEditor := preload("res://scripts/curve_editor.gd")
+
 signal param_changed(node_id: String, key: String, value: Variant)
+signal port_toggled(node_id: String, key: String, exposed: bool)
+signal export_toggled(node_id: String, port: String, format: String, on: bool)
 signal world_changed
+
+const EXPORT_FORMATS := [
+	["exr32", "EXR 32-bit (metres)"],
+	["png16", "PNG 16-bit"],
+]
 
 var project: TerrainProject
 var _box: VBoxContainer
 var _node_id := ""
 var _controls := {} # param key -> control (for pushing back clamped values)
+var _file_dialog: FileDialog
+var _file_target: LineEdit
 
 
 func _ready() -> void:
 	horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	custom_minimum_size = Vector2(300, 0)
+	custom_minimum_size = Vector2(320, 0)
 	var margin := MarginContainer.new()
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for side in ["left", "right", "top", "bottom"]:
@@ -23,6 +34,18 @@ func _ready() -> void:
 	_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_box.add_theme_constant_override("separation", 8)
 	margin.add_child(_box)
+
+	_file_dialog = FileDialog.new()
+	_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_file_dialog.use_native_dialog = true
+	_file_dialog.file_selected.connect(_on_file_chosen)
+	add_child(_file_dialog)
+
+
+## Id of the node being shown, or "" for world settings.
+func get_node_id() -> String:
+	return _node_id
 
 
 func _clear() -> void:
@@ -39,24 +62,40 @@ func _heading(text: String) -> void:
 	_box.add_child(l)
 
 
-func _note(text: String) -> void:
+func _subheading(text: String) -> void:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", 15)
+	_box.add_child(l)
+
+
+func _note(text: String) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.modulate = Color(1, 1, 1, 0.65)
+	# A fixed minimum width stops wrapped labels measuring one word per line.
+	l.custom_minimum_size = Vector2(280, 0)
 	_box.add_child(l)
+	return l
 
 
-func _row(label: String, control: Control, tooltip := "") -> void:
+## A labelled row. `extra` (optional) sits at the right of the label line.
+func _row(label: String, control: Control, tooltip := "", extra: Control = null) -> void:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 2)
+	var head := HBoxContainer.new()
 	var l := Label.new()
 	l.text = label
 	l.tooltip_text = tooltip
 	l.mouse_filter = Control.MOUSE_FILTER_PASS
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(l)
+	if extra != null:
+		head.add_child(extra)
 	control.tooltip_text = tooltip
 	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	v.add_child(l)
+	v.add_child(head)
 	v.add_child(control)
 	_box.add_child(v)
 
@@ -81,6 +120,8 @@ func _number(value: float, min_v: float, max_v: float, step: float, unit: String
 		slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		slider.share(spin)
+		# A new drag is a new undo step.
+		slider.drag_started.connect(func(): project.break_undo_merge())
 		h.add_child(slider)
 	else:
 		spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -132,8 +173,10 @@ func show_node(node: Dictionary, schema: Dictionary) -> void:
 		_note(schema["description"])
 	_box.add_child(HSeparator.new())
 	var values: Dictionary = node["params"]
+	var exposed := Array(node.get("exposed", PackedStringArray()))
 	for p in schema["params"]:
-		_add_param(p, values.get(p["key"], p["default"]))
+		_add_param(p, values.get(p["key"], p["default"]), exposed.has(p["key"]))
+	_add_export_section(node)
 
 
 func refresh_value(key: String, value: Variant) -> void:
@@ -146,7 +189,7 @@ func refresh_value(key: String, value: Variant) -> void:
 		(c as CheckBox).set_pressed_no_signal(value)
 
 
-func _add_param(p: Dictionary, value: Variant) -> void:
+func _add_param(p: Dictionary, value: Variant, exposed: bool) -> void:
 	var key: String = p["key"]
 	var id := _node_id
 	var unit: String = p["unit"]
@@ -177,10 +220,96 @@ func _add_param(p: Dictionary, value: Variant) -> void:
 					ob.select(i)
 			ob.item_selected.connect(func(i): param_changed.emit(id, key, options[i][0]))
 			control = ob
+		"curve":
+			var ce := CurveEditor.new()
+			var pts := PackedVector2Array()
+			for pt in value:
+				pts.append(Vector2(pt[0], pt[1]))
+			ce.set_points(pts)
+			ce.changed.connect(func(points): param_changed.emit(id, key, points))
+			control = ce
+		"file":
+			control = _file_control(value, p.get("filters", []), func(path): param_changed.emit(id, key, path))
 		_:
 			return
 	_controls[key] = control
-	_row(p["label"], control, p["description"])
+	var port_button: Button = null
+	if p.get("drivable", false):
+		port_button = Button.new()
+		port_button.text = "Mask port"
+		port_button.toggle_mode = true
+		port_button.button_pressed = exposed
+		port_button.flat = not exposed
+		port_button.focus_mode = Control.FOCUS_NONE
+		port_button.tooltip_text = "Drive this value with a mask: adds an input port to the node.\nThe mask scales the value: black = 0, white = the value set here."
+		port_button.toggled.connect(func(on): port_toggled.emit(id, key, on))
+	_row(p["label"], control, p["description"], port_button)
+	if exposed:
+		var n := _note("Scaled by the mask connected to the node's %s port." % p["label"])
+		n.add_theme_color_override("font_color", Color(0.55, 0.75, 0.95))
+
+
+func _file_control(value: String, filters: Array, on_change: Callable) -> Control:
+	var h := HBoxContainer.new()
+	var edit := LineEdit.new()
+	edit.text = value
+	edit.placeholder_text = "Choose a file…"
+	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	edit.text_submitted.connect(func(t): on_change.call(t))
+	edit.focus_exited.connect(func():
+		if edit.text != value:
+			on_change.call(edit.text))
+	edit.set_meta("on_change", on_change)
+	h.add_child(edit)
+	var browse := Button.new()
+	browse.text = "Browse…"
+	browse.pressed.connect(func():
+		_file_target = edit
+		_file_dialog.filters = PackedStringArray(filters)
+		var dir := project.get_project_dir()
+		if dir != "":
+			_file_dialog.current_dir = dir
+		_file_dialog.popup_centered_ratio(0.6))
+	h.add_child(browse)
+	return h
+
+
+func _on_file_chosen(path: String) -> void:
+	if _file_target == null or not is_instance_valid(_file_target):
+		return
+	# Files inside the project's folder are stored relative to it, so the
+	# project folder can be moved or shared.
+	var dir := project.get_project_dir()
+	if dir != "" and path.begins_with(dir.path_join("")):
+		path = path.substr(dir.path_join("").length())
+	_file_target.text = path
+	(_file_target.get_meta("on_change") as Callable).call(path)
+
+
+func _add_export_section(node: Dictionary) -> void:
+	var outputs: Array = node["outputs"]
+	if outputs.is_empty():
+		return
+	_box.add_child(HSeparator.new())
+	_subheading("Export")
+	_note("Marked outputs are written by Build (Build tab), at the build resolution.")
+	for o in outputs:
+		var formats := project.get_export_formats(node["id"], o["key"])
+		var h := HBoxContainer.new()
+		if outputs.size() > 1:
+			var l := Label.new()
+			l.text = o["label"]
+			h.add_child(l)
+		for f in EXPORT_FORMATS:
+			var cb := CheckBox.new()
+			cb.text = f[1]
+			cb.button_pressed = formats.has(f[0])
+			var id: String = node["id"]
+			var port: String = o["key"]
+			var format: String = f[0]
+			cb.toggled.connect(func(on): export_toggled.emit(id, port, format, on))
+			h.add_child(cb)
+		_box.add_child(h)
 
 
 func _seed_control(value: int, on_change: Callable) -> Control:

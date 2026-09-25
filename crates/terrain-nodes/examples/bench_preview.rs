@@ -1,8 +1,12 @@
-//! Times the v0.1 exit-criteria graph (fBm -> Levels) at common resolutions.
+//! Times preview evaluation.
 //! Run: cargo run --release -p terrain-nodes --example bench_preview
+//!
+//! 1. The v0.1 exit-criteria graph (fBm -> Levels) at common resolutions.
+//! 2. The alpine range example at 1024²: cold, then after editing its last
+//!    node (only that node recomputes; everything upstream comes from the cache).
 use std::time::Instant;
 
-use terrain_core::{EvalOptions, GridSpec, Project, evaluate_node};
+use terrain_core::{EvalCache, EvalOptions, GridSpec, ParamValue, Project, evaluate_node};
 
 fn main() {
     let reg = terrain_nodes::registry();
@@ -20,6 +24,34 @@ fn main() {
             t.elapsed().as_secs_f64() * 1000.0
         );
     }
+
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/examples/alpine_range.otstudio");
+    let (mut alpine, _) = Project::load(&path, &reg).unwrap();
+    let viewed = alpine.ui["viewed_node"].as_str().unwrap().to_string();
+    let spec = GridSpec::full_world(&alpine.world, 1024).unwrap();
+    let cache = EvalCache::default();
+    let opts = EvalOptions {
+        cache: Some(&cache),
+        ..Default::default()
+    };
+    let run = |p: &Project, what: &str| {
+        let before = cache.stats().misses;
+        let t = Instant::now();
+        evaluate_node(&p.graph, &reg, &p.world, spec, &viewed, &opts).unwrap();
+        println!(
+            " 1024²  alpine example, {what:<28} {:>7.1} ms  ({} of {} nodes computed)",
+            t.elapsed().as_secs_f64() * 1000.0,
+            cache.stats().misses - before,
+            p.graph.evaluation_order(&viewed).unwrap().len()
+        );
+    };
+    run(&alpine, "cold:");
+    alpine
+        .graph
+        .set_param(&reg, &viewed, "gamma", ParamValue::Float(1.3))
+        .unwrap();
+    run(&alpine, "after editing the last node:");
 }
 
 fn rayon_threads() -> usize {

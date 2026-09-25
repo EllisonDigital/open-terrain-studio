@@ -59,6 +59,20 @@ Exit criteria, as checked:
 
 ### v0.2 — Shaping toolkit
 
+**Status (25 Sep 2026):** complete on the `v0.2-shaping` branch; not merged or released yet. All deliverables are built and tested with the Linux app on Godot 4.7.2 and 4.6.2. Windows and macOS have not been run, as for v0.1.
+
+Exit criteria, as checked:
+
+- *Three reference landforms from built-in nodes only:* the alpine range, canyon and dune field in `app/examples/` (*File → Open Example*, included in the packaged app). A test loads each one without warnings and builds its marked outputs. They were judged by eye, not compared with reference photos. The terrain nodes are first versions, and erosion (v0.3) should make them look far more natural.
+- *Editing a downstream node never recomputes upstream nodes:* `editing_downstream_never_recomputes_upstream` counts computed nodes after edits at the end, the middle and the start of a chain. In the alpine example at 1,024², a cold preview takes 160 ms; after editing its last node it takes 6.7 ms, with 1 of 13 nodes recomputed (28-thread i7-14700HX; 514 ms and 17.8 ms on 4 threads).
+- *Undo works for 100+ steps:* a unit test undoes and redoes 150 steps; the UI test undoes and redoes 120 parameter edits in the running app.
+
+Differences from the plan:
+
+- Golden tests pin a hash of every node's output (`tests/golden/node_hashes.json`) instead of storing reference EXRs in Git LFS.
+- Resolution tests compare 513² with 2,049², so every fourth high-resolution sample lands exactly on a low-resolution one.
+- The cache is memory-only (1 GiB, least recently used first); spilling to disk comes with large builds (v0.8). Independent branches still run one after another, each node using all cores.
+
 **Goal:** enough nodes and editor comfort to build believable large-scale landforms by hand.
 
 **Deliverables**
@@ -235,3 +249,9 @@ All colour work lives in the dedicated **Colour** tab (ARCHITECTURE.md §5). Ter
 - Old hardware: supported via the Compatibility renderer with CPU-only compute.
 - Colour: a separate Colour graph tab, used only for applying colour.
 - Minimum GPU and RAM: set later from benchmark results.
+
+**Decided (25 Sep 2026)**
+
+- Mask ports scale a parameter: the value used at each cell is the value set × the mask (black = 0, white = the value set), clamped to the parameter's range.
+- Directions are degrees with 0° along +X and 90° along +Y, which is clockwise in the 2D view and in exported images.
+- Undo covers the graph, parameters, world settings and export marks. Build settings and editor state (camera, viewed node) are saved with the project but not undoable.

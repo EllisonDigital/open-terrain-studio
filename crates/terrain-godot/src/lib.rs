@@ -6,11 +6,15 @@
 //!
 //! | Class             | Kind       | Job                                              |
 //! |-------------------|------------|--------------------------------------------------|
-//! | `TerrainProject`  | RefCounted | load/save, world settings, UI state              |
+//! | `TerrainProject`  | RefCounted | load/save, world, undo/redo, export marks, UI    |
 //! | `TerrainGraph`    | RefCounted | add/remove/connect nodes, parameters, schemas    |
 //! | `TerrainBuilder`  | Node       | evaluates a node on a worker thread (preview)    |
 //! | `TerrainPreview`  | RefCounted | one evaluated result, as a Godot `Image`         |
-//! | `TerrainExporter` | Node       | writes EXR/PNG + build.json on a worker thread   |
+//! | `TerrainExporter` | Node       | exports / builds EXR/PNG + build.json on a worker |
+//!
+//! Preview and build jobs share one [`cache`], so viewing a node after editing
+//! a downstream one, or building outputs that share upstream nodes, reuses
+//! earlier results.
 
 mod builder;
 mod convert;
@@ -23,7 +27,7 @@ mod project;
 use std::sync::OnceLock;
 
 use godot::prelude::*;
-use terrain_core::NodeRegistry;
+use terrain_core::{EvalCache, NodeRegistry};
 
 struct OpenTerrainStudio;
 
@@ -34,4 +38,10 @@ unsafe impl ExtensionLibrary for OpenTerrainStudio {}
 pub(crate) fn registry() -> &'static NodeRegistry {
     static REGISTRY: OnceLock<NodeRegistry> = OnceLock::new();
     REGISTRY.get_or_init(terrain_nodes::registry)
+}
+
+/// Node results shared by every preview and build job.
+pub(crate) fn cache() -> &'static EvalCache {
+    static CACHE: OnceLock<EvalCache> = OnceLock::new();
+    CACHE.get_or_init(EvalCache::default)
 }

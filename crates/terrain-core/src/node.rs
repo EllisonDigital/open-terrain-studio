@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -6,7 +7,7 @@ use serde::Serialize;
 
 use crate::error::{CoreError, Result};
 use crate::grid::{Grid, GridSpec};
-use crate::params::{ParamDef, ParamValue};
+use crate::params::{Curve, ParamDef, ParamKind, ParamValue};
 use crate::world::World;
 
 /// The type of data flowing through a port.
@@ -76,6 +77,18 @@ pub struct PortDef {
     pub ty: PortType,
     /// Inputs only: may be left unconnected.
     pub optional: bool,
+    /// For a parameter port (a drivable parameter exposed as an input), the
+    /// parameter key. Empty for ordinary ports.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub param: String,
+}
+
+/// Input port keys for exposed parameters start with this, e.g. `p:height_m`.
+pub const PARAM_PORT_PREFIX: &str = "p:";
+
+/// The input port key for a drivable parameter.
+pub fn param_port_key(param: &str) -> String {
+    format!("{PARAM_PORT_PREFIX}{param}")
 }
 
 impl PortDef {
@@ -85,6 +98,18 @@ impl PortDef {
             label: label.into(),
             ty,
             optional: false,
+            param: String::new(),
+        }
+    }
+
+    /// The optional Mask input that drives parameter `def`.
+    pub fn for_param(def: &ParamDef) -> Self {
+        Self {
+            key: param_port_key(&def.key),
+            label: def.label.clone(),
+            ty: PortType::Mask,
+            optional: true,
+            param: def.key.clone(),
         }
     }
     pub fn optional(mut self) -> Self {
@@ -120,6 +145,19 @@ impl NodeSchema {
     pub fn param(&self, key: &str) -> Option<&ParamDef> {
         self.params.iter().find(|p| p.key == key)
     }
+
+    /// Input ports of a node instance: the schema's inputs, then a port for
+    /// each exposed drivable parameter (in parameter order).
+    pub fn input_ports(&self, exposed: &std::collections::BTreeSet<String>) -> Vec<PortDef> {
+        let mut ports = self.inputs.clone();
+        ports.extend(
+            self.params
+                .iter()
+                .filter(|p| p.drivable && exposed.contains(&p.key))
+                .map(PortDef::for_param),
+        );
+        ports
+    }
 }
 
 /// Results of one node evaluation, by output port key.
@@ -136,6 +174,46 @@ pub trait NodeKind: Send + Sync + 'static {
     fn migrate(&self, _from_version: u32, _params: &mut BTreeMap<String, ParamValue>) -> Result<()> {
         Ok(())
     }
+
+    /// Extra text mixed into this node's cache key, for results that depend on
+    /// something outside the graph (e.g. an imported file's size and date).
+    fn cache_salt(&self, _params: &BTreeMap<String, ParamValue>, _base_dir: Option<&Path>) -> String {
+        String::new()
+    }
+}
+
+/// A float parameter that may vary per cell (see [`ParamDef::drivable`]).
+#[derive(Clone, Copy)]
+pub enum Field<'a> {
+    Const(f32),
+    /// `value × mask`, clamped to `min..max`.
+    Driven {
+        value: f32,
+        min: f32,
+        max: f32,
+        mask: &'a Grid,
+    },
+}
+
+impl Field<'_> {
+    /// The value at flat cell index `idx` (row-major, like `Grid::data`).
+    #[inline]
+    pub fn at(&self, idx: usize) -> f32 {
+        match *self {
+            Field::Const(v) => v,
+            Field::Driven {
+                value,
+                min,
+                max,
+                mask,
+            } => (value * mask.data[idx].clamp(0.0, 1.0)).clamp(min, max),
+        }
+    }
+
+    /// True if the value is the same everywhere.
+    pub fn is_const(&self) -> bool {
+        matches!(self, Field::Const(_))
+    }
 }
 
 /// What a node sees while it evaluates.
@@ -150,6 +228,8 @@ pub struct EvalContext<'a> {
     pub(crate) params: &'a BTreeMap<String, ParamValue>,
     pub(crate) inputs: BTreeMap<String, Value>,
     pub(crate) cancel: Option<&'a AtomicBool>,
+    /// Folder relative file paths are resolved against (the project's folder).
+    pub base_dir: Option<&'a Path>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -172,6 +252,7 @@ impl<'a> EvalContext<'a> {
             params,
             inputs,
             cancel: None,
+            base_dir: None,
         }
     }
 
@@ -201,6 +282,39 @@ impl<'a> EvalContext<'a> {
     pub fn choice(&self, key: &str) -> String {
         self.param(key).as_str().unwrap_or_default().to_string()
     }
+    pub fn text(&self, key: &str) -> String {
+        self.choice(key)
+    }
+    pub fn curve(&self, key: &str) -> Curve {
+        Curve::parse(&self.param(key))
+            .or_else(|_| Curve::parse(&self.schema.param(key).expect("curve param").default))
+            .expect("curve default is valid")
+    }
+
+    /// A float parameter that a mask may drive per cell (see [`ParamDef::drivable`]).
+    pub fn field(&self, key: &str) -> Field<'_> {
+        let value = self.f32(key);
+        match self.inputs.get(&param_port_key(key)) {
+            Some(v) => {
+                let (min, max) = match self.schema.param(key).map(|d| &d.kind) {
+                    Some(ParamKind::Float { min, max, .. }) => (*min as f32, *max as f32),
+                    _ => (f32::MIN, f32::MAX),
+                };
+                Field::Driven {
+                    value,
+                    min,
+                    max,
+                    mask: v.grid(),
+                }
+            }
+            None => Field::Const(value),
+        }
+    }
+
+    /// Resolve a file path parameter against the project folder.
+    pub fn path(&self, key: &str) -> Option<PathBuf> {
+        resolve_path(&self.text(key), self.base_dir)
+    }
 
     /// An input, already converted to the port's declared type. `None` if unconnected.
     pub fn input(&self, key: &str) -> Option<&Value> {
@@ -222,6 +336,18 @@ impl<'a> EvalContext<'a> {
     pub fn is_cancelled(&self) -> bool {
         self.cancel.is_some_and(|c| c.load(Ordering::Relaxed))
     }
+}
+
+/// Resolve a (possibly relative) path against `base_dir`. `None` if empty.
+pub fn resolve_path(path: &str, base_dir: Option<&Path>) -> Option<PathBuf> {
+    if path.is_empty() {
+        return None;
+    }
+    let p = Path::new(path);
+    Some(match base_dir {
+        Some(dir) if p.is_relative() => dir.join(p),
+        _ => p.to_path_buf(),
+    })
 }
 
 /// All node types known to the app, keyed by `type_id`.
