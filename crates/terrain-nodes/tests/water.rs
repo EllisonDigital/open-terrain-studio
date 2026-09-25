@@ -267,8 +267,14 @@ fn outputs_match_across_resolutions() {
                 let p99 = diffs[diffs.len() * 99 / 100];
                 let id = &node.schema().type_id;
                 // Shore bands come from a distance transform, exact to about
-                // one coarse cell (8 m of a 30 m band).
-                let tol_p99 = if key == "shore" { 0.3 } else { 0.1 };
+                // one coarse cell (8 m of a 30 m band); river masks show the
+                // share of each pixel covered, so their edges depend on
+                // the pixel size.
+                let tol_p99 = if ["shore", "river", "riverbank"].contains(&key.as_str()) {
+                    0.3
+                } else {
+                    0.1
+                };
                 assert!(
                     mean < 0.01 && p99 < tol_p99,
                     "{id}.{key}: mean {mean:.4}, p99 {p99:.4}"

@@ -14,6 +14,7 @@ use crate::hydro::{
     self, FLOW_HI_M2, FLOW_LO_M2, LINK_OUTLET, Routing, flat_jitter, log_mask, resample, route,
     sample_nearest_m, simulation_spec,
 };
+use crate::noise::basis::{self, Basis};
 
 fn fail(ctx: &EvalContext, message: &str) -> CoreError {
     CoreError::NodeFailed {
@@ -404,6 +405,10 @@ impl Default for Rivers {
                         .describe("Depth of the largest rivers below their water surface, in metres."),
                     ParamDef::metres("bank_width_m", "Bank width", 20.0, 0.0, 5000.0)
                         .describe("Width of the sloping bank beside each river, and of the Riverbank mask."),
+                    ParamDef::metres("meander_m", "Meander", 30.0, 0.0, 1000.0).describe(
+                        "How far rivers wander from the valley line, in metres, in bends about 12 times as \
+                         long. 0 follows the drainage exactly.",
+                    ),
                     detail_param(8.0),
                 ],
                 gpu: false,
@@ -440,7 +445,30 @@ fn river_reaches(d: &Drainage, r: &Routing, area: &[f64], ctx: &EvalContext) -> 
     let (w, _) = d.size();
     let source = ctx.f64("source_area_km2") * 1.0e6;
     let (max_w, depth) = (ctx.f64("width_m"), ctx.f64("depth_m"));
-    let pos = |i: usize| [d.spec.x_m((i % w) as u32), d.spec.y_m((i / w) as u32)];
+    // Meander: shift the centreline by a smooth random field so rivers
+    // don't follow the drainage grid's 45° steps. The shift fades out at
+    // the world's edges so rivers still leave through them.
+    let amp = ctx.f64("meander_m");
+    let wavelength = (12.0 * amp).max(50.0);
+    let s = d.spec;
+    let edge_x = [s.origin_m[0], s.origin_m[0] + s.extent_m[0]];
+    let edge_y = [s.origin_m[1], s.origin_m[1] + s.extent_m[1]];
+    let pos = |i: usize| {
+        let (x, y) = (s.x_m((i % w) as u32), s.y_m((i / w) as u32));
+        if amp <= 0.0 {
+            return [x, y];
+        }
+        let to_edge = (x - edge_x[0])
+            .min(edge_x[1] - x)
+            .min(y - edge_y[0])
+            .min(edge_y[1] - y);
+        let k = amp * (to_edge / (2.0 * amp)).min(1.0);
+        let (u, v) = (x / wavelength, y / wavelength);
+        [
+            x + k * basis::fbm(Basis::Perlin, u, v, ctx.seed, 3, 2.0, 0.5),
+            y + k * basis::fbm(Basis::Perlin, u, v, ctx.seed ^ 0x6d65_616e, 3, 2.0, 0.5),
+        ]
+    };
     let mid = |a: [f64; 2], b: [f64; 2]| [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
     // Size grows with drained area on a log scale, from a tenth at the source
     // to full size at 1000 × the source area.
@@ -535,13 +563,14 @@ impl NodeKind for Rivers {
         let (w, ht) = (spec.width as usize, spec.height as usize);
         let bank = ctx.f64("bank_width_m");
         let [cx, cy] = spec.cell_size_m();
+        let pixel = cx.min(cy);
         // Bucket reaches by blocks of rows; each block is then independent.
         const BLOCK: usize = 32;
         let blocks = ht.div_ceil(BLOCK);
         let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); blocks];
         let row_of = |y: f64| (y - spec.origin_m[1]) / cy;
         for (n, reach) in reaches.iter().enumerate() {
-            let rad = reach.radius(bank);
+            let rad = reach.radius(bank) + pixel;
             let lo = row_of(reach.a[1].min(reach.b[1]) - rad).floor().max(0.0) as usize;
             let hi = (row_of(reach.a[1].max(reach.b[1]) + rad).ceil().max(0.0) as usize).min(ht - 1);
             if lo > hi {
@@ -568,7 +597,7 @@ impl NodeKind for Rivers {
                 let mut water_level = vec![f64::NEG_INFINITY; height.len()];
                 for &n in &buckets[block] {
                     let reach = &reaches[n as usize];
-                    let rad = reach.radius(bank);
+                    let rad = reach.radius(bank) + pixel;
                     let (x0, x1) = (reach.a[0].min(reach.b[0]) - rad, reach.a[0].max(reach.b[0]) + rad);
                     let (y0, y1) = (reach.a[1].min(reach.b[1]) - rad, reach.a[1].max(reach.b[1]) + rad);
                     let i_lo = ((x0 - spec.origin_m[0]) / cx).floor().max(0.0) as usize;
@@ -590,7 +619,7 @@ impl NodeKind for Rivers {
                             let (qx, qy) = (px - s * ax, py - s * ay);
                             let dist = (qx * qx + qy * qy).sqrt();
                             let hw = reach.half_width[0] + (reach.half_width[1] - reach.half_width[0]) * s;
-                            if dist >= hw + bank {
+                            if dist >= hw + bank.max(0.5 * pixel) {
                                 continue;
                             }
                             let level = reach.level[0] + (reach.level[1] - reach.level[0]) * s;
@@ -607,9 +636,11 @@ impl NodeKind for Rivers {
                                 h
                             };
                             height[k] = height[k].min(target.min(h) as f32);
+                            // Share of the pixel covered by water, so rivers
+                            // narrower than a pixel still show.
+                            let cover = ((hw - dist) / pixel + 0.5).clamp(0.0, 1.0) as f32;
+                            river[k] = river[k].max(cover);
                             if dist < hw {
-                                // Soft over the last metre of the bank edge.
-                                river[k] = river[k].max(((hw - dist) as f32 + 0.5).clamp(0.0, 1.0));
                                 water_level[k] = water_level[k].max(level);
                             } else if bank > 0.0 {
                                 let u = ((dist - hw) / bank) as f32;

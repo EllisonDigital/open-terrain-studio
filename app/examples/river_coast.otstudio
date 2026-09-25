@@ -1,0 +1,212 @@
+{
+  "format_version": 1,
+  "app_version": "0.5.0",
+  "world": {
+    "size_m": [
+      8192,
+      8192
+    ],
+    "height_range_m": [
+      0,
+      2000
+    ],
+    "seed": 5150
+  },
+  "next_node_id": 8,
+  "nodes": [
+    {
+      "id": "n_0001",
+      "type": "terrain.mountain",
+      "type_version": 1,
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "height_m": 1600,
+        "radius_m": 3900,
+        "base_m": 0,
+        "roughness": 0.8
+      }
+    },
+    {
+      "id": "n_0002",
+      "type": "simulate.hydraulic",
+      "type_version": 1,
+      "pos": [
+        320,
+        0
+      ],
+      "params": {
+        "detail_m": 16
+      }
+    },
+    {
+      "id": "n_0003",
+      "type": "simulate.rivers",
+      "type_version": 1,
+      "pos": [
+        640,
+        0
+      ],
+      "params": {
+        "source_area_km2": 0.15,
+        "detail_m": 16
+      }
+    },
+    {
+      "id": "n_0004",
+      "type": "simulate.lakes",
+      "type_version": 1,
+      "pos": [
+        960,
+        0
+      ],
+      "params": {
+        "detail_m": 16
+      }
+    },
+    {
+      "id": "n_0005",
+      "type": "simulate.sea",
+      "type_version": 1,
+      "pos": [
+        1280,
+        0
+      ],
+      "params": {
+        "sea_level_m": 120
+      }
+    },
+    {
+      "id": "n_0006",
+      "type": "simulate.snow",
+      "type_version": 1,
+      "pos": [
+        1600,
+        0
+      ],
+      "params": {
+        "snow_line_m": 800
+      }
+    },
+    {
+      "id": "n_0007",
+      "type": "terrain.crater",
+      "type_version": 1,
+      "pos": [
+        480,
+        220
+      ],
+      "params": {
+        "radius_m": 550,
+        "depth_m": 140,
+        "rim_height_m": 40,
+        "pos_x_m": -1500,
+        "pos_y_m": 1300
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": [
+        "n_0001",
+        "out"
+      ],
+      "to": [
+        "n_0002",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0002",
+        "height"
+      ],
+      "to": [
+        "n_0007",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "height"
+      ],
+      "to": [
+        "n_0004",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0004",
+        "height"
+      ],
+      "to": [
+        "n_0005",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0005",
+        "height"
+      ],
+      "to": [
+        "n_0006",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0007",
+        "out"
+      ],
+      "to": [
+        "n_0003",
+        "in"
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "node": "n_0006",
+      "port": "height",
+      "format": "exr32"
+    },
+    {
+      "node": "n_0003",
+      "port": "river",
+      "format": "png16"
+    },
+    {
+      "node": "n_0004",
+      "port": "lakes",
+      "format": "png16"
+    },
+    {
+      "node": "n_0005",
+      "port": "sea",
+      "format": "png16"
+    },
+    {
+      "node": "n_0005",
+      "port": "shoreline",
+      "format": "png16"
+    },
+    {
+      "node": "n_0006",
+      "port": "snow",
+      "format": "png16"
+    }
+  ],
+  "build": {
+    "resolution": 2049,
+    "folder": "output/river_coast"
+  },
+  "ui": {
+    "viewed_node": "n_0006",
+    "preview_resolution": 1024
+  }
+}

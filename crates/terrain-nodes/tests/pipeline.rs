@@ -563,5 +563,5 @@ fn bundled_examples_load_and_build() {
         build_marked(&p, &reg, 65, &out, &EvalOptions::default()).unwrap();
         std::fs::remove_dir_all(&out).ok();
     }
-    assert_eq!(found, 5);
+    assert_eq!(found, 6);
 }
