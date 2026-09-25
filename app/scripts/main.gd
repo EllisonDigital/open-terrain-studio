@@ -21,6 +21,7 @@ const EXAMPLES := [
 	["Canyon", "res://examples/canyon.otstudio"],
 	["Dune field", "res://examples/dune_field.otstudio"],
 	["Eroded strata", "res://examples/eroded_strata.otstudio"],
+	["Asterfall Crown — Hero World", "res://examples/asterfall_crown.otstudio"],
 ]
 
 enum Menu { NEW, OPEN, SAVE, SAVE_AS, EXPORT, QUIT, WORLD, DOCS, ABOUT, UNDO, REDO, MARK_EXPORT, BUILD,
