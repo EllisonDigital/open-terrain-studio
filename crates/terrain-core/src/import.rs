@@ -113,3 +113,84 @@ fn read_png(path: &Path) -> Result<HeightImage> {
         values: ImageValues::Normalised,
     })
 }
+
+/// A decoded RGBA image (values 0..1 as stored; PNG and JPEG are sRGB),
+/// interleaved, row 0 first.
+#[derive(Clone, Debug)]
+pub struct ColorImage {
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<f32>,
+}
+
+impl ColorImage {
+    /// Bilinear sample at pixel coordinates (clamped to the edges).
+    pub fn sample(&self, px: f64, py: f64) -> [f32; 4] {
+        let (w, h) = (self.width as i64, self.height as i64);
+        let (x0, y0) = (px.floor(), py.floor());
+        let (tx, ty) = ((px - x0) as f32, (py - y0) as f32);
+        let (x0, y0) = (x0 as i64, y0 as i64);
+        std::array::from_fn(|c| {
+            let at = |x: i64, y: i64| {
+                let x = x.clamp(0, w - 1) as usize;
+                let y = y.clamp(0, h - 1) as usize;
+                self.data[(y * self.width as usize + x) * 4 + c]
+            };
+            let top = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * tx;
+            let bottom = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * tx;
+            top + (bottom - top) * ty
+        })
+    }
+}
+
+/// Read a colour image (PNG, JPEG or EXR). EXR channels R, G, B and A are
+/// read as stored; missing ones are 0 (colour) or 1 (alpha).
+pub fn read_color_image(path: &Path) -> Result<ColorImage> {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if !path.is_file() {
+        return Err(CoreError::Image(format!("file not found: {}", path.display())));
+    }
+    let img = match ext.as_str() {
+        "exr" => {
+            let img = exr::prelude::read_first_flat_layer_from_file(path)
+                .map_err(|e| CoreError::Image(format!("{}: {e}", path.display())))?;
+            let size = img.layer_data.size;
+            let n = size.width() * size.height();
+            let channels = &img.layer_data.channel_data.list;
+            let find = |name: &str, fill: f32| -> Vec<f32> {
+                channels
+                    .iter()
+                    .find(|c| c.name.to_string() == name)
+                    .map(|c| c.sample_data.values_as_f32().collect())
+                    .unwrap_or_else(|| vec![fill; n])
+            };
+            let planes = [find("R", 0.0), find("G", 0.0), find("B", 0.0), find("A", 1.0)];
+            ColorImage {
+                width: size.width() as u32,
+                height: size.height() as u32,
+                data: (0..n * 4).map(|k| planes[k % 4][k / 4]).collect(),
+            }
+        }
+        "png" | "jpg" | "jpeg" => {
+            let img = image::open(path).map_err(|e| CoreError::Image(format!("{}: {e}", path.display())))?;
+            let rgba = img.into_rgba32f();
+            ColorImage {
+                width: rgba.width(),
+                height: rgba.height(),
+                data: rgba.into_raw(),
+            }
+        }
+        other => {
+            return Err(CoreError::Image(format!(
+                "unsupported image type '.{other}' (use .png, .jpg or .exr)"
+            )));
+        }
+    };
+    if img.width < 2 || img.height < 2 {
+        return Err(CoreError::Image("image must be at least 2 × 2 pixels".into()));
+    }
+    Ok(img)
+}

@@ -7,7 +7,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
-use crate::graph::{Graph, Link, NodeInstance};
+use crate::graph::{Graph, Link, NodeInstance, Tab};
 use crate::node::NodeRegistry;
 use crate::params::ParamValue;
 use crate::world::World;
@@ -138,6 +138,13 @@ struct NodeFile {
     /// Parameters shown as input ports.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     exposed: BTreeSet<String>,
+    /// Editor tab; omitted for the Terrain tab.
+    #[serde(default, skip_serializing_if = "is_terrain")]
+    tab: Tab,
+}
+
+fn is_terrain(tab: &Tab) -> bool {
+    *tab == Tab::Terrain
 }
 
 #[derive(Serialize, Deserialize)]
@@ -164,6 +171,7 @@ impl Project {
                     pos: n.pos,
                     params: n.params.clone(),
                     exposed: n.exposed.clone(),
+                    tab: n.tab,
                 })
                 .collect(),
             links: self
@@ -207,6 +215,7 @@ impl Project {
                 pos: n.pos,
                 params: n.params,
                 exposed: n.exposed,
+                tab: n.tab,
             };
             match registry.get(&node.type_id) {
                 None => warnings.push(format!(

@@ -25,6 +25,9 @@ uniform float overlay_opacity = 0.85;
 // Snow cover (0..1) from Snow nodes, painted white over the ground.
 uniform sampler2D snow_tex : filter_linear, repeat_disable;
 uniform bool show_snow = false;
+// A colour map (sRGB) draped over the terrain, e.g. from Colourise.
+uniform sampler2D color_tex : filter_linear, repeat_disable;
+uniform bool show_color = false;
 
 varying vec2 terrain_uv;
 varying float height_m;
@@ -88,6 +91,11 @@ void fragment() {
 	if (show_snow) {
 		float s = clamp(texture(snow_tex, terrain_uv).r, 0.0, 1.0);
 		albedo = mix(albedo, vec3(0.80, 0.82, 0.86), s);
+	}
+	if (show_color) {
+		vec3 c = clamp(texture(color_tex, terrain_uv).rgb, 0.0, 1.0);
+		// sRGB to linear albedo.
+		albedo = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
 	}
 	if (show_overlay) {
 		float m = clamp(texture(overlay_tex, terrain_uv).r, 0.0, 1.0);

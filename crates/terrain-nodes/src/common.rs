@@ -89,3 +89,28 @@ pub fn grid_positions(p: Params, spec: GridSpec) -> Params {
         .f(14, spec.origin_m[1] as f32)
         .f(15, cell[1] as f32)
 }
+
+/// Cache salt for a node that reads the file in parameter key: its path,
+/// size and modification time, so the node re-reads it when it changes.
+pub fn file_salt(
+    params: &std::collections::BTreeMap<String, terrain_core::ParamValue>,
+    key: &str,
+    base_dir: Option<&std::path::Path>,
+) -> String {
+    let path = params.get(key).and_then(|v| v.as_str()).unwrap_or_default();
+    let Some(p) = terrain_core::node::resolve_path(path, base_dir) else {
+        return String::new();
+    };
+    match std::fs::metadata(&p) {
+        Ok(m) => {
+            let modified = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            format!("{}|{}|{modified}", p.display(), m.len())
+        }
+        Err(_) => format!("{}|missing", p.display()),
+    }
+}

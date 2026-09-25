@@ -203,9 +203,90 @@ impl Grid {
     }
 }
 
+/// A colour per sample: red, green, blue and alpha, each 0..1, row-major and
+/// interleaved (`data[4 × index + channel]`). Colours are sRGB-encoded, as
+/// painted and as stored in 8/16-bit images; see `docs/colour.md`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColorGrid {
+    pub spec: GridSpec,
+    pub data: Vec<f32>,
+}
+
+impl ColorGrid {
+    /// Build by evaluating `f(index, x_m, y_m)` at every sample, rows in parallel.
+    pub fn from_fn_indexed<F>(spec: GridSpec, f: F) -> Self
+    where
+        F: Fn(usize, f64, f64) -> [f32; 4] + Sync,
+    {
+        let w = spec.width as usize;
+        let mut data = vec![0.0f32; spec.len() * 4];
+        data.par_chunks_mut(w * 4).enumerate().for_each(|(j, row)| {
+            let y = spec.y_m(j as u32);
+            for (i, px) in row.chunks_mut(4).enumerate() {
+                px.copy_from_slice(&f(j * w + i, spec.x_m(i as u32), y));
+            }
+        });
+        Self { spec, data }
+    }
+
+    /// Colour of sample `index`.
+    #[inline]
+    pub fn at(&self, index: usize) -> [f32; 4] {
+        let d = &self.data[index * 4..index * 4 + 4];
+        [d[0], d[1], d[2], d[3]]
+    }
+
+    /// One channel (0 = red … 3 = alpha) as a grid.
+    pub fn channel(&self, c: usize) -> Grid {
+        Grid {
+            spec: self.spec,
+            data: self.data.par_chunks(4).map(|px| px[c]).collect(),
+        }
+    }
+
+    /// Bilinear colour at a world position in metres (clamped at the edges).
+    pub fn sample_bilinear_m(&self, x_m: f64, y_m: f64) -> [f32; 4] {
+        std::array::from_fn(|c| {
+            let s = self.spec;
+            let fx = (x_m - s.origin_m[0]) / s.extent_m[0] * (s.width - 1) as f64;
+            let fy = (y_m - s.origin_m[1]) / s.extent_m[1] * (s.height - 1) as f64;
+            let (x0, y0) = (fx.floor(), fy.floor());
+            let (tx, ty) = ((fx - x0) as f32, (fy - y0) as f32);
+            let at = |i: i64, j: i64| {
+                let i = i.clamp(0, s.width as i64 - 1) as usize;
+                let j = j.clamp(0, s.height as i64 - 1) as usize;
+                self.data[(j * s.width as usize + i) * 4 + c]
+            };
+            let (x0, y0) = (x0 as i64, y0 as i64);
+            let top = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * tx;
+            let bottom = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * tx;
+            top + (bottom - top) * ty
+        })
+    }
+}
+
+/// sRGB-encoded value (0..1) to linear light.
+#[inline]
+pub fn srgb_to_linear(v: f32) -> f32 {
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        libm::powf((v + 0.055) / 1.055, 2.4)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn colour_grids_sample_and_split_channels() {
+        let c = ColorGrid::from_fn_indexed(spec(3), |i, x, _| [i as f32, (x / 8192.0) as f32, 0.5, 1.0]);
+        assert_eq!(c.at(4), [4.0, 0.5, 0.5, 1.0]);
+        assert_eq!(c.channel(0).data, (0..9).map(|i| i as f32).collect::<Vec<_>>());
+        assert_eq!(c.sample_bilinear_m(2048.0, 0.0), [0.5, 0.25, 0.5, 1.0]);
+        assert!((srgb_to_linear(0.5) - 0.214).abs() < 1.0e-3);
+    }
 
     fn spec(res: u32) -> GridSpec {
         GridSpec::full_world(&World::default(), res).unwrap()

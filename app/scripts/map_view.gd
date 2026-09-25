@@ -64,7 +64,7 @@ func show_preview(preview: TerrainPreview) -> void:
 	var img: Image = preview.get_image()
 	if img == null:
 		return
-	if _texture != null and _texture.get_width() == img.get_width():
+	if _texture != null and _texture.get_width() == img.get_width() and _texture.get_format() == img.get_format():
 		_texture.update(img)
 	else:
 		_texture = ImageTexture.create_from_image(img)
@@ -92,6 +92,7 @@ func _update_uniforms() -> void:
 	var is_mask := _preview != null and _preview.get_port_type() == "mask"
 	_material.set_shader_parameter("map_tex", _texture)
 	_material.set_shader_parameter("is_mask", is_mask)
+	_material.set_shader_parameter("is_color", _preview != null and _preview.get_port_type() == "color_map")
 	_material.set_shader_parameter("value_min", height_min)
 	_material.set_shader_parameter("value_max", height_max)
 	if _preview != null:
@@ -135,7 +136,10 @@ func readout_at(local: Vector2) -> String:
 		return ""
 	var v := _preview.sample(p.x, p.y)
 	var text := "x %.0f m   y %.0f m   " % [p.x, p.y]
-	if _preview.get_port_type() == "mask":
+	if _preview.get_port_type() == "color_map":
+		var c := _preview.sample_color(p.x, p.y)
+		text += "colour #%s   R %.2f  G %.2f  B %.2f" % [c.to_html(false), c.r, c.g, c.b]
+	elif _preview.get_port_type() == "mask":
 		text += "mask %.3f" % v
 		var base := _preview.sample_base(p.x, p.y)
 		if not is_nan(base):

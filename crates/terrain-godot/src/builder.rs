@@ -127,15 +127,18 @@ impl TerrainBuilder {
                     let value = outputs
                         .get(port)
                         .ok_or_else(|| format!("node {node} has no output '{port}'"))?;
-                    Ok((value.grid().clone(), value.port_type()))
+                    Ok(value.clone())
                 };
-            let (grid, ty) = eval(&n2, &p2, Some(progress))?;
+            let grid_of = |node: &str, port: &str| eval(node, port, None).map(|v| v.grid().clone());
+            let value = eval(&n2, &p2, Some(progress))?;
+            let ty = value.port_type();
+            let n = spec.len();
             // The base terrain is upstream, so it is normally already cached.
-            let base: Option<(Arc<Grid>, String)> = if ty == PortType::Mask {
+            let base: Option<(Arc<Grid>, String)> = if ty != PortType::Heightfield {
                 snapshot
                     .graph
                     .base_heightfield(registry(), &n2)
-                    .and_then(|(bn, bp)| eval(&bn, &bp, None).ok().map(|(g, _)| (g, bn)))
+                    .and_then(|(bn, bp)| grid_of(&bn, &bp).ok().map(|g| (g, bn)))
             } else {
                 None
             };
@@ -144,13 +147,12 @@ impl TerrainBuilder {
             let water = if ty == PortType::Heightfield {
                 let mut level: Option<Vec<f32>> = None;
                 for source in snapshot.graph.water_sources(registry(), &n2) {
-                    let (Ok((height, _)), Ok((surface, _))) = (
-                        eval(&source, "height", None),
-                        eval(&source, "water_surface", None),
-                    ) else {
+                    let (Ok(height), Ok(surface)) =
+                        (grid_of(&source, "height"), grid_of(&source, "water_surface"))
+                    else {
                         continue;
                     };
-                    let level = level.get_or_insert_with(|| vec![DRY; grid.data.len()]);
+                    let level = level.get_or_insert_with(|| vec![DRY; n]);
                     for ((l, s), h) in level.iter_mut().zip(&surface.data).zip(&height.data) {
                         if *s > *h + WATER_MIN_DEPTH_M {
                             *l = l.max(*s);
@@ -166,10 +168,10 @@ impl TerrainBuilder {
             let snow = if ty == PortType::Heightfield {
                 let mut cover: Option<Vec<f32>> = None;
                 for source in snapshot.graph.snow_sources(registry(), &n2) {
-                    let Ok((snow, _)) = eval(&source, "snow", None) else {
+                    let Ok(snow) = grid_of(&source, "snow") else {
                         continue;
                     };
-                    let cover = cover.get_or_insert_with(|| vec![0.0; grid.data.len()]);
+                    let cover = cover.get_or_insert_with(|| vec![0.0; n]);
                     for (c, s) in cover.iter_mut().zip(&snow.data) {
                         *c = c.max(*s);
                     }
@@ -179,8 +181,7 @@ impl TerrainBuilder {
                 None
             };
             Ok(PreviewData {
-                grid,
-                port_type: ty,
+                value,
                 base,
                 water,
                 snow,

@@ -6,7 +6,7 @@ mod support;
 
 use std::collections::BTreeMap;
 
-use support::{bits, eval, project_for, registry, temp_dir};
+use support::{bits, eval, eval_value, project_for, registry, temp_dir};
 use terrain_core::PortType;
 use terrain_core::seed::fnv1a64;
 
@@ -57,8 +57,8 @@ fn every_node_is_deterministic_across_thread_counts() {
 fn tolerance(type_id: &str) -> (f64, f64) {
     match type_id {
         // Derivatives and thresholds of derivatives.
-        "data.slope" | "data.aspect" => (0.01, 0.08),
-        "data.curvature" | "adjust.sharpen" => (0.01, 0.08),
+        "data.slope" | "data.aspect" | "output.normal_map" => (0.01, 0.08),
+        "data.curvature" | "adjust.sharpen" | "data.occlusion" => (0.01, 0.08),
         // Distances are exact to about one low-res cell (16 m of a 500 m fade).
         "data.distance" => (0.01, 0.05),
         _ => (0.002, 0.01),
@@ -73,13 +73,19 @@ fn every_node_is_resolution_independent() {
     let mut report = Vec::new();
     for schema in reg.schemas() {
         let (p, id) = project_for(&reg, &schema.type_id, &dir);
-        let (lo, _) = eval(&p, &reg, &id, 513);
-        let (hi, _) = eval(&p, &reg, &id, 2049);
-        let (min, max) = hi.min_max();
-        let range = ((max - min) as f64).max(1e-3);
-        let mut diffs: Vec<f64> = (0..513u32)
-            .flat_map(|j| (0..513u32).map(move |i| (i, j)))
-            .map(|(i, j)| (lo.get(i, j) - hi.get(i * 4, j * 4)).abs() as f64 / range)
+        let lo = eval_value(&p, &reg, &id, 513).channels();
+        let hi = eval_value(&p, &reg, &id, 2049).channels();
+        // Every channel (one, or R, G, B, A), each relative to its own range.
+        let mut diffs: Vec<f64> = lo
+            .iter()
+            .zip(&hi)
+            .flat_map(|(lo, hi)| {
+                let (min, max) = hi.min_max();
+                let range = ((max - min) as f64).max(1e-3);
+                (0..513u32)
+                    .flat_map(|j| (0..513u32).map(move |i| (i, j)))
+                    .map(move |(i, j)| (lo.get(i, j) - hi.get(i * 4, j * 4)).abs() as f64 / range)
+            })
             .collect();
         diffs.sort_by(f64::total_cmp);
         let mean = diffs.iter().sum::<f64>() / diffs.len() as f64;
@@ -112,7 +118,7 @@ fn golden_hashes() {
         let bytes: Vec<u8> = schema
             .outputs
             .iter()
-            .flat_map(|o| out[&o.key].grid().data.iter().flat_map(|v| v.to_le_bytes()))
+            .flat_map(|o| out[&o.key].samples().iter().flat_map(|v| v.to_le_bytes()))
             .collect();
         hashes.insert(schema.type_id.clone(), format!("{:016x}", fnv1a64(&bytes)));
     }

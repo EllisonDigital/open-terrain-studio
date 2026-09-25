@@ -12,6 +12,7 @@
 
 pub mod adjust;
 pub mod basic;
+pub mod colour;
 pub mod common;
 pub mod data;
 pub mod erosion;
@@ -72,6 +73,7 @@ pub fn registry() -> NodeRegistry {
     r.register(data::Distance::default());
     r.register(water::Flow::default());
     r.register(water::Wetness::default());
+    r.register(colour::Occlusion::default());
     r.register(erosion::RockHardness::default());
     // Simulate
     r.register(erosion::Hydraulic::default());
@@ -80,5 +82,16 @@ pub fn registry() -> NodeRegistry {
     r.register(water::Rivers::default());
     r.register(water::Sea::default());
     r.register(water::Snow::default());
+    // Colour
+    r.register(colour::Colourise::default());
+    r.register(colour::Blend::default());
+    r.register(colour::Layers::default());
+    r.register(colour::Image::default());
+    // Output
+    r.register(colour::NormalMap::default());
+    r.register(colour::Splat::default());
+    // Portals (Terrain tab to Colour tab)
+    r.register(colour::Portal::new(terrain_core::PortType::Heightfield));
+    r.register(colour::Portal::new(terrain_core::PortType::Mask));
     r
 }

@@ -20,3 +20,8 @@ and builds every `.otstudio` in this directory.
 **River coast** is the v0.5 water example: a mountain island, eroded, with a crater on its flank, then
 Rivers, Lakes, Sea and Snow. Rivers run to the sea at the world's edges, the crater holds a lake, and the
 River, Lakes, Sea, Shoreline and Snow masks are marked for export. See [water.md](../../docs/water.md).
+
+The v0.6 **Colour** tab builds a colour map from grass, rock, sand, snow and water,
+plus a four-layer splat map and normal map. Height and masks arrive from the
+Terrain tab through portals. These new outputs are also marked for export;
+see [colour.md](../../docs/colour.md).

@@ -12,7 +12,7 @@
     ],
     "seed": 5150
   },
-  "next_node_id": 8,
+  "next_node_id": 25,
   "nodes": [
     {
       "id": "n_0001",
@@ -105,6 +105,213 @@
       "params": {
         "snow_line_m": 800
       }
+    },
+    {
+      "id": "n_0008",
+      "type": "portal.height",
+      "type_version": 1,
+      "pos": [
+        0,
+        0
+      ],
+      "params": {},
+      "tab": "colour"
+    },
+    {
+      "id": "n_0009",
+      "type": "portal.mask",
+      "type_version": 1,
+      "pos": [
+        0,
+        160
+      ],
+      "params": {},
+      "tab": "colour"
+    },
+    {
+      "id": "n_000a",
+      "type": "portal.mask",
+      "type_version": 1,
+      "pos": [
+        0,
+        320
+      ],
+      "params": {},
+      "tab": "colour"
+    },
+    {
+      "id": "n_000b",
+      "type": "portal.mask",
+      "type_version": 1,
+      "pos": [
+        0,
+        480
+      ],
+      "params": {},
+      "tab": "colour"
+    },
+    {
+      "id": "n_000c",
+      "type": "portal.mask",
+      "type_version": 1,
+      "pos": [
+        0,
+        640
+      ],
+      "params": {},
+      "tab": "colour"
+    },
+    {
+      "id": "n_000d",
+      "type": "data.slope",
+      "type_version": 1,
+      "pos": [
+        320,
+        -200
+      ],
+      "params": {
+        "min_deg": 28,
+        "max_deg": 90,
+        "falloff_deg": 8
+      },
+      "tab": "colour"
+    },
+    {
+      "id": "n_000e",
+      "type": "colour.colourise",
+      "type_version": 1,
+      "pos": [
+        320,
+        0
+      ],
+      "params": {
+        "preset": "grass",
+        "low": 0,
+        "high": 0.6
+      },
+      "tab": "colour"
+    },
+    {
+      "id": "n_000f",
+      "type": "colour.colourise",
+      "type_version": 1,
+      "pos": [
+        320,
+        200
+      ],
+      "params": {
+        "preset": "rock"
+      },
+      "tab": "colour"
+    },
+    {
+      "id": "n_0010",
+      "type": "colour.colourise",
+      "type_version": 1,
+      "pos": [
+        320,
+        400
+      ],
+      "params": {
+        "preset": "sand"
+      },
+      "tab": "colour"
+    },
+    {
+      "id": "n_0011",
+      "type": "colour.colourise",
+      "type_version": 1,
+      "pos": [
+        320,
+        600
+      ],
+      "params": {
+        "preset": "snow"
+      },
+      "tab": "colour"
+    },
+    {
+      "id": "n_0012",
+      "type": "colour.colourise",
+      "type_version": 1,
+      "pos": [
+        320,
+        800
+      ],
+      "params": {
+        "preset": "water",
+        "low": 0,
+        "high": 0.1
+      },
+      "tab": "colour"
+    },
+    {
+      "id": "n_0013",
+      "type": "colour.layers",
+      "type_version": 1,
+      "pos": [
+        700,
+        200
+      ],
+      "params": {},
+      "tab": "colour"
+    },
+    {
+      "id": "n_0014",
+      "type": "colour.blend",
+      "type_version": 1,
+      "pos": [
+        1000,
+        300
+      ],
+      "params": {},
+      "tab": "colour"
+    },
+    {
+      "id": "n_0015",
+      "type": "output.splat",
+      "type_version": 1,
+      "pos": [
+        1000,
+        -200
+      ],
+      "params": {},
+      "tab": "colour"
+    },
+    {
+      "id": "n_0016",
+      "type": "output.normal_map",
+      "type_version": 1,
+      "pos": [
+        1000,
+        700
+      ],
+      "params": {},
+      "tab": "colour"
+    },
+    {
+      "id": "n_0017",
+      "type": "portal.mask",
+      "type_version": 1,
+      "pos": [
+        0,
+        800
+      ],
+      "params": {},
+      "tab": "colour"
+    },
+    {
+      "id": "n_0018",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        320,
+        1000
+      ],
+      "params": {
+        "mode": "max"
+      },
+      "tab": "colour"
     }
   ],
   "links": [
@@ -167,6 +374,306 @@
         "n_0003",
         "in"
       ]
+    },
+    {
+      "from": [
+        "n_0006",
+        "height"
+      ],
+      "to": [
+        "n_0008",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0005",
+        "sea"
+      ],
+      "to": [
+        "n_0009",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0005",
+        "shoreline"
+      ],
+      "to": [
+        "n_000a",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "river"
+      ],
+      "to": [
+        "n_000b",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0006",
+        "snow"
+      ],
+      "to": [
+        "n_000c",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0008",
+        "out"
+      ],
+      "to": [
+        "n_000d",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0008",
+        "out"
+      ],
+      "to": [
+        "n_000e",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0008",
+        "out"
+      ],
+      "to": [
+        "n_000f",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0008",
+        "out"
+      ],
+      "to": [
+        "n_0010",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0008",
+        "out"
+      ],
+      "to": [
+        "n_0011",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0008",
+        "out"
+      ],
+      "to": [
+        "n_0012",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_000e",
+        "out"
+      ],
+      "to": [
+        "n_0013",
+        "base"
+      ]
+    },
+    {
+      "from": [
+        "n_000f",
+        "out"
+      ],
+      "to": [
+        "n_0013",
+        "color_1"
+      ]
+    },
+    {
+      "from": [
+        "n_000d",
+        "out"
+      ],
+      "to": [
+        "n_0013",
+        "mask_1"
+      ]
+    },
+    {
+      "from": [
+        "n_0010",
+        "out"
+      ],
+      "to": [
+        "n_0013",
+        "color_2"
+      ]
+    },
+    {
+      "from": [
+        "n_000a",
+        "out"
+      ],
+      "to": [
+        "n_0013",
+        "mask_2"
+      ]
+    },
+    {
+      "from": [
+        "n_0011",
+        "out"
+      ],
+      "to": [
+        "n_0013",
+        "color_3"
+      ]
+    },
+    {
+      "from": [
+        "n_000c",
+        "out"
+      ],
+      "to": [
+        "n_0013",
+        "mask_3"
+      ]
+    },
+    {
+      "from": [
+        "n_0012",
+        "out"
+      ],
+      "to": [
+        "n_0013",
+        "color_4"
+      ]
+    },
+    {
+      "from": [
+        "n_0018",
+        "out"
+      ],
+      "to": [
+        "n_0013",
+        "mask_4"
+      ]
+    },
+    {
+      "from": [
+        "n_0013",
+        "out"
+      ],
+      "to": [
+        "n_0014",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0012",
+        "out"
+      ],
+      "to": [
+        "n_0014",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_000b",
+        "out"
+      ],
+      "to": [
+        "n_0014",
+        "mask"
+      ]
+    },
+    {
+      "from": [
+        "n_000d",
+        "out"
+      ],
+      "to": [
+        "n_0015",
+        "layer_2"
+      ]
+    },
+    {
+      "from": [
+        "n_000a",
+        "out"
+      ],
+      "to": [
+        "n_0015",
+        "layer_3"
+      ]
+    },
+    {
+      "from": [
+        "n_000c",
+        "out"
+      ],
+      "to": [
+        "n_0015",
+        "layer_4"
+      ]
+    },
+    {
+      "from": [
+        "n_0008",
+        "out"
+      ],
+      "to": [
+        "n_0016",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0004",
+        "lakes"
+      ],
+      "to": [
+        "n_0017",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0009",
+        "out"
+      ],
+      "to": [
+        "n_0018",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_0018",
+        "b"
+      ]
     }
   ],
   "exports": [
@@ -199,6 +706,26 @@
       "node": "n_0006",
       "port": "snow",
       "format": "png16"
+    },
+    {
+      "node": "n_0006",
+      "port": "height",
+      "format": "png16"
+    },
+    {
+      "node": "n_0014",
+      "port": "out",
+      "format": "png8"
+    },
+    {
+      "node": "n_0015",
+      "port": "weights_1_4",
+      "format": "png8"
+    },
+    {
+      "node": "n_0016",
+      "port": "out",
+      "format": "png8"
     }
   ],
   "build": {

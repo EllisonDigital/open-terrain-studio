@@ -26,7 +26,7 @@ serde_json = "1"
 thiserror = "2"
 libm = "0.2"
 exr = "1.73"
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 [profile.dev]
 # Terrain maths is far too slow unoptimised; keep debug info but optimise.

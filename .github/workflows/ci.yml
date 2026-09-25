@@ -91,6 +91,7 @@ jobs:
           "$GODOT" --headless --path app --script res://tests/smoke_test.gd
           "$GODOT" --headless --path app --script res://tests/erosion_test.gd
           "$GODOT" --headless --path app --script res://tests/water_test.gd
+          "$GODOT" --headless --path app --script res://tests/colour_test.gd
 
   godot-gpu:
     runs-on: ubuntu-latest

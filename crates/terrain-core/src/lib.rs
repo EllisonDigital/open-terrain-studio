@@ -26,11 +26,11 @@ pub use cache::{CacheStats, EvalCache};
 pub use error::CoreError;
 pub use eval::{EvalOptions, evaluate_node};
 pub use gpu::{Gpu, GpuBuffer, GpuDevice, GpuField, GpuGrid, GpuStats, Kernel, Params};
-pub use graph::{Graph, Link, NodeId, NodeInstance};
-pub use grid::{Grid, GridSpec};
+pub use graph::{Graph, Link, NodeId, NodeInstance, Tab};
+pub use grid::{ColorGrid, Grid, GridSpec};
 pub use history::{EditState, History};
 pub use node::{EvalContext, Field, NodeKind, NodeRegistry, NodeSchema, Outputs, PortDef, PortType, Value};
-pub use params::{Curve, ParamDef, ParamKind, ParamValue};
+pub use params::{Curve, Gradient, ParamDef, ParamKind, ParamValue};
 pub use project::Project;
 pub use world::World;
 
