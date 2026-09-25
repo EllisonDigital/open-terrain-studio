@@ -623,3 +623,49 @@ impl NodeKind for Splat {
         Ok(outputs)
     }
 }
+
+// ---- Portals ------------------------------------------------------------------
+
+/// A Terrain-tab output brought into the Colour tab (ARCHITECTURE.md §5).
+/// Passes its input through unchanged.
+pub struct Portal {
+    schema: NodeSchema,
+}
+
+impl Portal {
+    /// A portal for heightfields (`portal.height`) or masks (`portal.mask`).
+    pub fn new(ty: PortType) -> Self {
+        let (id, label, what) = match ty {
+            PortType::Heightfield => ("portal.height", "Height Portal", "a heightfield"),
+            _ => ("portal.mask", "Mask Portal", "a mask"),
+        };
+        Self {
+            schema: schema(
+                id,
+                label,
+                "Portal",
+                &format!(
+                    "Brings {what} from the Terrain tab into the Colour tab, so colour work never \
+                     recomputes the terrain. Create one with \"Send to Colour tab\" on a Terrain \
+                     node's output."
+                ),
+                vec![PortDef::new("in", "From Terrain", ty)],
+                vec![PortDef::new("out", "Out", ty)],
+                vec![],
+            ),
+        }
+    }
+}
+
+impl NodeKind for Portal {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let v = ctx.input("in").cloned().ok_or_else(|| CoreError::MissingInput {
+            node: ctx.node_id.into(),
+            port: "in".into(),
+        })?;
+        Ok(Outputs::from([("out".to_string(), v)]))
+    }
+}

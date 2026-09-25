@@ -169,6 +169,12 @@ Differences from the plan:
 
 **Goal:** produce everything an engine needs to texture the terrain.
 
+**Status:** implemented on the `v0.6-colour` branch; not merged or released. Colour tab, portals,
+ColorMap preview and exports, gradients, blending/layers, image import, normal/cavity and splat
+nodes are covered by focused Rust and Godot tests. The *River coast* example has four-layer
+weights, a normal map and a colour map marked for export. The under-10-minute Unreal/Godot import
+criterion still needs a timed hands-on check; see [colour.md](colour.md).
+
 All colour work lives in the dedicated **Colour** tab (ARCHITECTURE.md §5). Terrain outputs arrive there as portals, so colour changes never recompute the terrain.
 
 **Deliverables**

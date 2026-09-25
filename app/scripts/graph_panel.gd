@@ -25,6 +25,9 @@ const GPU_BADGE_COLOR := Color(0.5, 0.8, 1.0)
 const CPU_BADGE_COLOR := Color(1, 1, 1, 0.35)
 
 var graph: TerrainGraph
+## Editor tab shown: "terrain" or "colour". Links to nodes in the other tab
+## are hidden; Colour-tab portals show where their data comes from.
+var tab := "terrain"
 ## A GPU is in use: badge each node with where it computes.
 var gpu_active := false
 var viewed_id := ""
@@ -70,6 +73,16 @@ func set_graph(g: TerrainGraph) -> void:
 	frame_all.call_deferred()
 
 
+## Show another editor tab ("terrain" or "colour").
+func set_tab(t: String) -> void:
+	tab = t
+	if graph == null:
+		return
+	_build_add_menu()
+	rebuild()
+	frame_all()
+
+
 ## Zoom and scroll so every node is visible (at most 100% zoom).
 func frame_all() -> void:
 	# Node sizes are only known after a layout pass.
@@ -100,9 +113,12 @@ func rebuild() -> void:
 	_ports.clear()
 	if graph == null:
 		return
-	for node in graph.get_nodes():
-		_add_graph_node(node, selected.has(node["id"]))
-	for link in graph.get_links():
+	var nodes: Array = graph.get_nodes()
+	var links: Array = graph.get_links()
+	for node in nodes:
+		if node.get("tab", "terrain") == tab:
+			_add_graph_node(node, selected.has(node["id"]), _portal_source(node, nodes, links))
+	for link in links:
 		var from_idx: int = _ports.get(link["from"], {}).get("outputs", []).find(link["from_port"])
 		var to_idx: int = _ports.get(link["to"], {}).get("inputs", []).find(link["to_port"])
 		if from_idx >= 0 and to_idx >= 0:
@@ -126,7 +142,7 @@ func select_node(id: String) -> void:
 
 ## Add a node of `type_id` at a graph position; returns its id.
 func add_node_at(type_id: String, graph_pos: Vector2) -> String:
-	var id := graph.add_node(type_id, graph_pos)
+	var id := graph.add_node_in_tab(type_id, graph_pos, tab)
 	if id == "":
 		status.emit("Could not add node: %s" % graph.get_last_error())
 		return ""
@@ -137,10 +153,26 @@ func add_node_at(type_id: String, graph_pos: Vector2) -> String:
 	return id
 
 
-func _add_graph_node(node: Dictionary, selected: bool) -> void:
+## For a portal: "<node> · <output>" it brings from the Terrain tab, or "".
+func _portal_source(node: Dictionary, nodes: Array, links: Array) -> String:
+	if not String(node["type"]).begins_with("portal."):
+		return ""
+	for link in links:
+		if link["to"] == node["id"] and link["to_port"] == "in":
+			for n in nodes:
+				if n["id"] == link["from"]:
+					var port_label: String = link["from_port"]
+					for o in n["outputs"]:
+						if o["key"] == link["from_port"]:
+							port_label = o["label"]
+					return "%s · %s" % [n["label"], port_label]
+	return "(source deleted)"
+
+
+func _add_graph_node(node: Dictionary, selected: bool, portal_source := "") -> void:
 	var gn := GraphNode.new()
 	gn.name = node["id"]
-	gn.title = node["label"]
+	gn.title = node["label"] if portal_source == "" else "⇠ " + portal_source
 	gn.position_offset = node["pos"]
 	gn.tooltip_text = "%s (%s)" % [node["label"], node["id"]]
 	gn.custom_minimum_size = Vector2(160, 0)
@@ -174,7 +206,10 @@ func _add_graph_node(node: Dictionary, selected: bool) -> void:
 		row.add_child(left)
 		row.add_child(right)
 		gn.add_child(row)
-		var has_in := i < inputs.size()
+		var has_in := i < inputs.size() and portal_source == ""
+		if portal_source != "":
+			left.text = "from Terrain"
+			left.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
 		var has_out := i < outputs.size()
 		var in_type: String = inputs[i]["type"] if has_in else "heightfield"
 		var out_type: String = outputs[i]["type"] if has_out else "heightfield"
@@ -237,6 +272,9 @@ func _build_add_menu() -> void:
 	_type_ids.clear()
 	var by_category := {}
 	for t in graph.get_node_types():
+		# Portals are made with "Send to Colour tab"; colour work lives in the Colour tab.
+		if t["category"] == "Portal" or (tab == "terrain" and t["category"] == "Colour"):
+			continue
 		by_category.get_or_add(t["category"], []).append(t)
 	var order := ["Primitives", "Noise", "Terrain", "Adjust", "Combine", "Data", "Simulate", "Colour", "Output"]
 	var categories: Array = by_category.keys()

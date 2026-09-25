@@ -90,5 +90,8 @@ pub fn registry() -> NodeRegistry {
     // Output
     r.register(colour::NormalMap::default());
     r.register(colour::Splat::default());
+    // Portals (Terrain tab to Colour tab)
+    r.register(colour::Portal::new(terrain_core::PortType::Heightfield));
+    r.register(colour::Portal::new(terrain_core::PortType::Mask));
     r
 }

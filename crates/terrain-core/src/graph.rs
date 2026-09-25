@@ -9,6 +9,33 @@ use crate::params::ParamValue;
 /// Stable node identifier, e.g. `n_0003`. Used for seeding and never reused.
 pub type NodeId = String;
 
+/// The graph editor tab a node belongs to (ARCHITECTURE.md §5). Tabs only
+/// organise the editor: links may cross them (the Colour tab reads Terrain
+/// outputs through portal nodes) and evaluation ignores them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tab {
+    #[default]
+    Terrain,
+    Colour,
+}
+
+impl Tab {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "terrain" => Some(Self::Terrain),
+            "colour" => Some(Self::Colour),
+            _ => None,
+        }
+    }
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Terrain => "terrain",
+            Self::Colour => "colour",
+        }
+    }
+}
+
 /// One node placed in the graph.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NodeInstance {
@@ -21,6 +48,8 @@ pub struct NodeInstance {
     pub params: BTreeMap<String, ParamValue>,
     /// Drivable parameters shown as input ports (see `ParamDef::drivable`).
     pub exposed: BTreeSet<String>,
+    /// Editor tab the node is shown in.
+    pub tab: Tab,
 }
 
 /// A connection from an output port to an input port.
@@ -83,9 +112,16 @@ impl Graph {
                 pos,
                 params: BTreeMap::new(),
                 exposed: BTreeSet::new(),
+                tab: Tab::Terrain,
             },
         );
         Ok(id)
+    }
+
+    /// Move a node to another editor tab.
+    pub fn set_tab(&mut self, id: &str, tab: Tab) -> Result<()> {
+        self.node_mut(id)?.tab = tab;
+        Ok(())
     }
 
     /// Input ports of a node: its schema's inputs plus exposed parameter ports.

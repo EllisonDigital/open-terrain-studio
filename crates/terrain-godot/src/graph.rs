@@ -1,5 +1,5 @@
 use godot::prelude::*;
-use terrain_core::NodeSchema;
+use terrain_core::{NodeSchema, PortType, Tab};
 
 use crate::convert::{json_to_variant, param_to_variant, put, variant_to_param};
 use crate::project::{Shared, lock};
@@ -83,6 +83,7 @@ impl TerrainGraph {
             put(&mut d, "id", GString::from(node.id.as_str()));
             put(&mut d, "type", GString::from(node.type_id.as_str()));
             put(&mut d, "pos", Vector2::new(node.pos[0], node.pos[1]));
+            put(&mut d, "tab", node.tab.key());
             let mut params = VarDictionary::new();
             match registry().schema(&node.type_id) {
                 Some(schema) => {
@@ -183,6 +184,75 @@ impl TerrainGraph {
             .unwrap_or_default();
         let result = lock(&self.shared).edit(&label, None, |p| {
             p.graph.add_node(registry(), &type_id, [pos.x, pos.y])
+        });
+        match result {
+            Ok(id) => id.as_str().into(),
+            Err(e) => {
+                self.fail(e.to_string());
+                GString::new()
+            }
+        }
+    }
+
+    /// Add a node to an editor tab ("terrain" or "colour"). Returns its id, or
+    /// "" on error.
+    #[func]
+    fn add_node_in_tab(&mut self, type_id: GString, pos: Vector2, tab: GString) -> GString {
+        let Some(tab) = Tab::parse(&tab.to_string()) else {
+            self.fail(format!("unknown tab '{tab}'"));
+            return GString::new();
+        };
+        let type_id = type_id.to_string();
+        let label = registry()
+            .schema(&type_id)
+            .map(|s| format!("Add {}", s.label))
+            .unwrap_or_default();
+        let result = lock(&self.shared).edit(&label, None, |p| {
+            let id = p.graph.add_node(registry(), &type_id, [pos.x, pos.y])?;
+            p.graph.set_tab(&id, tab)?;
+            Ok(id)
+        });
+        match result {
+            Ok(id) => id.as_str().into(),
+            Err(e) => {
+                self.fail(e.to_string());
+                GString::new()
+            }
+        }
+    }
+
+    /// Bring a Terrain-tab output into the Colour tab: adds a Height or Mask
+    /// Portal there at `pos`, linked to `from`'s output `from_port`. Returns
+    /// the portal's id, or "" on error (e.g. for a colour map).
+    #[func]
+    fn send_to_colour_tab(&mut self, from: GString, from_port: GString, pos: Vector2) -> GString {
+        let (from, from_port) = (from.to_string(), from_port.to_string());
+        let ty = lock(&self.shared)
+            .project
+            .graph
+            .node(&from)
+            .and_then(|n| registry().schema(&n.type_id))
+            .and_then(|s| s.output(&from_port))
+            .map(|o| o.ty);
+        let portal = match ty {
+            Some(PortType::Heightfield) => "portal.height",
+            Some(PortType::Mask) => "portal.mask",
+            Some(PortType::ColorMap) => {
+                self.fail(
+                    "colour maps are made in the Colour tab; only heights and masks can be sent".into(),
+                );
+                return GString::new();
+            }
+            None => {
+                self.fail(format!("node {from} has no output '{from_port}'"));
+                return GString::new();
+            }
+        };
+        let result = lock(&self.shared).edit("Send to Colour tab", None, |p| {
+            let id = p.graph.add_node(registry(), portal, [pos.x, pos.y])?;
+            p.graph.set_tab(&id, Tab::Colour)?;
+            p.graph.connect(registry(), &from, &from_port, &id, "in")?;
+            Ok(id)
         });
         match result {
             Ok(id) => id.as_str().into(),

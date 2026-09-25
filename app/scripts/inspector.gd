@@ -8,12 +8,13 @@ const GradientEditor := preload("res://scripts/gradient_editor.gd")
 signal param_changed(node_id: String, key: String, value: Variant)
 signal port_toggled(node_id: String, key: String, exposed: bool)
 signal export_toggled(node_id: String, port: String, format: String, on: bool)
+signal send_to_colour(node_id: String, port: String)
 signal world_changed
 
 const EXPORT_FORMATS := [
-	["exr32", "EXR 32-bit (metres)"],
-	["png16", "PNG 16-bit"],
-	["png8", "PNG 8-bit"],
+	["exr32", "EXR", "32-bit float EXR: heights in metres; colours RGBA"],
+	["png16", "PNG 16", "16-bit PNG: heights over the world height range; colours RGBA"],
+	["png8", "PNG 8", "8-bit PNG, e.g. colour and splat maps for engines"],
 ]
 
 var project: TerrainProject
@@ -310,6 +311,7 @@ func _add_export_section(node: Dictionary) -> void:
 		for f in EXPORT_FORMATS:
 			var cb := CheckBox.new()
 			cb.text = f[1]
+			cb.tooltip_text = f[2]
 			cb.button_pressed = formats.has(f[0])
 			var id: String = node["id"]
 			var port: String = o["key"]
@@ -317,6 +319,27 @@ func _add_export_section(node: Dictionary) -> void:
 			cb.toggled.connect(func(on): export_toggled.emit(id, port, format, on))
 			h.add_child(cb)
 		_box.add_child(h)
+	_add_colour_section(node)
+
+
+## Terrain nodes: buttons that bring an output into the Colour tab.
+func _add_colour_section(node: Dictionary) -> void:
+	if node.get("tab", "terrain") != "terrain":
+		return
+	var sendable: Array = node["outputs"].filter(func(o): return o["type"] != "color_map")
+	if sendable.is_empty():
+		return
+	_box.add_child(HSeparator.new())
+	_subheading("Colour tab")
+	_note("Colour the terrain in the Colour tab: send an output there as a portal.")
+	for o in sendable:
+		var b := Button.new()
+		b.text = "Send %s to Colour tab" % o["label"] if sendable.size() > 1 else "Send to Colour tab"
+		b.tooltip_text = "Adds a portal in the Colour tab that brings this output there."
+		var id: String = node["id"]
+		var port: String = o["key"]
+		b.pressed.connect(func(): send_to_colour.emit(id, port))
+		_box.add_child(b)
 
 
 func _seed_control(value: int, on_change: Callable) -> Control:

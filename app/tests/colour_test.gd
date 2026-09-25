@@ -85,5 +85,34 @@ func run() -> void:
 			var loaded := Image.load_from_file(f)
 			check(loaded != null and loaded.get_width() == 65, "exported %s loads" % f.get_file())
 
+	# The Colour tab: portals bring Terrain outputs over; tabs are saved.
+	var portal := graph.send_to_colour_tab(terrain, "out", Vector2(-300, 0))
+	check(portal != "", "height sent to the Colour tab")
+	var mask_portal := graph.send_to_colour_tab(slope, "out", Vector2(-300, 150))
+	check(graph.send_to_colour_tab(blend, "out", Vector2.ZERO) == "", "colour maps can't be sent")
+	var tabs := {}
+	var types := {}
+	for n in graph.get_nodes():
+		tabs[n["id"]] = n["tab"]
+		types[n["id"]] = n["type"]
+	check(tabs[portal] == "colour" and tabs[terrain] == "terrain", "portal in the Colour tab, source in Terrain")
+	check(types[portal] == "portal.height" and types[mask_portal] == "portal.mask", "portal types follow the output")
+	var paint := graph.add_node_in_tab("colour.colourise", Vector2(0, 0), "colour")
+	check(graph.connect_ports(portal, "out", paint, "in") == "", "portal -> colourise")
+	builder.request_preview(project, paint, "out", 65)
+	preview = await builder.preview_ready
+	check(preview.get_port_type() == "color_map" and preview.get_base_node_id() == portal, "colour through a portal drapes over the portal's terrain")
+	check(project.undo() == "Connect" and project.undo() == "Add Colourise", "undo tab edits")
+	project.redo()
+	project.redo()
+	var saved := OS.get_user_data_dir().path_join("colour_tabs.otstudio")
+	check(project.save(saved), "save with a Colour tab")
+	var reopened := TerrainProject.new()
+	check(reopened.load(saved), "reopen")
+	var reopened_tabs := {}
+	for n in reopened.get_graph().get_nodes():
+		reopened_tabs[n["id"]] = n["tab"]
+	check(reopened_tabs == tabs.merged({paint: "colour"}), "tabs survive saving")
+
 	print("COLOUR FAILED: %d" % failures if failures else "COLOUR ALL PASSED")
 	quit(1 if failures else 0)
