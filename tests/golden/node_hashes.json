@@ -33,6 +33,7 @@
   "primitive.shape": "0045a92a870a0f43",
   "simulate.hydraulic": "8bc2ed9a5e9bb4da",
   "simulate.lakes": "83b6256ea7585d6b",
+  "simulate.rivers": "9ae4dcf279f87fc0",
   "simulate.thermal": "c27a492148e4dd16",
   "terrain.canyon": "5e7909a15841521f",
   "terrain.crater": "1b9c0a9b144673bd",

@@ -76,5 +76,6 @@ pub fn registry() -> NodeRegistry {
     r.register(erosion::Hydraulic::default());
     r.register(erosion::Thermal::default());
     r.register(water::Lakes::default());
+    r.register(water::Rivers::default());
     r
 }

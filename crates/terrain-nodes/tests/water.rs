@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use terrain_core::{EvalContext, Grid, GridSpec, NodeKind, Outputs, ParamValue, Value, World};
-use terrain_nodes::water::{Flow, Lakes};
+use terrain_nodes::water::{Flow, Lakes, Rivers};
 
 fn world() -> World {
     World {
@@ -48,7 +48,11 @@ fn bits(g: &Grid) -> Vec<u32> {
 }
 
 fn water_nodes() -> Vec<Box<dyn NodeKind>> {
-    vec![Box::new(Flow::default()), Box::new(Lakes::default())]
+    vec![
+        Box::new(Flow::default()),
+        Box::new(Lakes::default()),
+        Box::new(Rivers::default()),
+    ]
 }
 
 #[test]
@@ -194,4 +198,82 @@ fn small_or_shallow_hollows_stay_dry_and_edge_hollows_drain() {
     });
     let out = run(&Lakes::default(), &open, &[]);
     assert!(out["lakes"].grid().data.iter().all(|v| *v == 0.0));
+}
+
+#[test]
+fn rivers_carve_valley_floors_down_to_the_edge_and_leave_ridges() {
+    let g = two_valleys(129);
+    let out = run(
+        &Rivers::default(),
+        &g,
+        &[
+            ("source_area_km2", ParamValue::Float(0.02)),
+            ("detail_m", ParamValue::Float(8.0)),
+        ],
+    );
+    let (h, river, bank, surface) = (
+        out["height"].grid(),
+        out["river"].grid(),
+        out["riverbank"].grid(),
+        out["water_surface"].grid(),
+    );
+    // Along the west valley floor, from the headwaters to the y = 0 edge.
+    for j in [1, 20, 60] {
+        let (i, wet) = (26..=38)
+            .map(|i| (i, river.get(i, j)))
+            .fold((0, 0.0f32), |a, b| if b.1 > a.1 { b } else { a });
+        assert!(wet > 0.9, "row {j}: no river (max {wet})");
+        assert!(h.get(i, j) < g.get(i, j) - 0.5, "row {j}: not carved");
+        assert!(surface.get(i, j) > h.get(i, j), "row {j}: no water above the bed");
+    }
+    // The ridge between the valleys is untouched and dry.
+    for j in [20, 60, 100] {
+        assert_eq!(h.get(64, j), g.get(64, j));
+        assert_eq!(river.get(64, j), 0.0);
+        assert_eq!(surface.get(64, j), g.get(64, j));
+    }
+    // Carving only lowers; banks sit beside the water, not in it.
+    assert!(h.data.iter().zip(&g.data).all(|(a, b)| a <= b));
+    assert!(bank.data.iter().any(|v| *v > 0.5));
+    assert!(
+        bank.data
+            .iter()
+            .zip(&river.data)
+            .all(|(b, r)| *r < 1.0 || *b == 0.0)
+    );
+}
+
+#[test]
+fn outputs_match_across_resolutions() {
+    // 129 and 513 samples: every 4th fine sample sits on a coarse one.
+    let params = [
+        ("detail_m", ParamValue::Float(16.0)),
+        ("source_area_km2", ParamValue::Float(0.02)),
+    ];
+    for node in water_nodes() {
+        for terrain in [two_valleys as fn(u32) -> Grid, bowl] {
+            let lo = run(node.as_ref(), &terrain(129), &params);
+            let hi = run(node.as_ref(), &terrain(513), &params);
+            for (key, v) in &lo {
+                let (a, b) = (v.grid(), hi[key].grid());
+                let (min, max) = b.min_max();
+                let range = ((max - min) as f64).max(1.0e-3);
+                let mut diffs: Vec<f64> = (0..129u32)
+                    .flat_map(|j| (0..129u32).map(move |i| (i, j)))
+                    .map(|(i, j)| (a.get(i, j) - b.get(i * 4, j * 4)).abs() as f64 / range)
+                    .collect();
+                diffs.sort_by(f64::total_cmp);
+                let mean = diffs.iter().sum::<f64>() / diffs.len() as f64;
+                let p99 = diffs[diffs.len() * 99 / 100];
+                let id = &node.schema().type_id;
+                // Shore bands come from a distance transform, exact to about
+                // one coarse cell (8 m of a 30 m band).
+                let tol_p99 = if key == "shore" { 0.3 } else { 0.1 };
+                assert!(
+                    mean < 0.01 && p99 < tol_p99,
+                    "{id}.{key}: mean {mean:.4}, p99 {p99:.4}"
+                );
+            }
+        }
+    }
 }

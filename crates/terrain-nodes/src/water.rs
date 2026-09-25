@@ -362,6 +362,287 @@ impl NodeKind for Lakes {
     }
 }
 
+// ---- Rivers -----------------------------------------------------------------
+
+/// Carve river channels where enough water collects.
+pub struct Rivers {
+    schema: NodeSchema,
+}
+
+impl Default for Rivers {
+    fn default() -> Self {
+        Self {
+            schema: NodeSchema {
+                type_id: "simulate.rivers".into(),
+                type_version: 1,
+                label: "Rivers".into(),
+                category: "Simulate".into(),
+                description: "Carves river channels where the water draining through a point exceeds Source \
+                              area, widening and deepening downstream. Rivers run to the world's edges, \
+                              crossing hollows at their spill level. Outputs the carved Height, the Water \
+                              surface, the River mask and a Riverbank mask."
+                    .into(),
+                inputs: vec![PortDef::new("in", "Terrain", PortType::Heightfield)],
+                outputs: vec![
+                    PortDef::new("height", "Height", PortType::Heightfield),
+                    PortDef::new("water_surface", "Water surface", PortType::Heightfield),
+                    PortDef::new("river", "River", PortType::Mask),
+                    PortDef::new("riverbank", "Riverbank", PortType::Mask),
+                ],
+                params: vec![
+                    ParamDef::float("source_area_km2", "Source area", 0.5, 0.001, 10_000.0)
+                        .unit("km²")
+                        .describe(
+                            "Area that must drain through a point before a river starts there. Smaller \
+                             values give more, smaller streams.",
+                        ),
+                    ParamDef::metres("width_m", "Width", 40.0, 0.1, 5000.0).describe(
+                        "Width of the largest rivers (draining 1000 × Source area), in metres. Streams \
+                         start at a tenth of this.",
+                    ),
+                    ParamDef::metres("depth_m", "Depth", 4.0, 0.0, 500.0)
+                        .describe("Depth of the largest rivers below their water surface, in metres."),
+                    ParamDef::metres("bank_width_m", "Bank width", 20.0, 0.0, 5000.0)
+                        .describe("Width of the sloping bank beside each river, and of the Riverbank mask."),
+                    detail_param(8.0),
+                ],
+                gpu: false,
+            },
+        }
+    }
+}
+
+/// A short straight piece of river centreline with its properties at each
+/// end: water level (m), half width (m) and depth (m).
+#[derive(Clone, Copy)]
+struct Reach {
+    a: [f64; 2],
+    b: [f64; 2],
+    level: [f64; 2],
+    half_width: [f64; 2],
+    depth: [f64; 2],
+}
+
+impl Reach {
+    /// Reach of influence beyond the centreline, metres.
+    fn radius(&self, bank: f64) -> f64 {
+        self.half_width[0].max(self.half_width[1]) + bank
+    }
+}
+
+/// Each river bend (a quadratic Bézier) is drawn as this many straight reaches.
+const PIECES: usize = 4;
+
+/// River centrelines from the routing: every river cell draws a curve from
+/// the middle of its link to the middle of its receiver's link, so D8 steps
+/// become smooth bends and tributaries join smoothly.
+fn river_reaches(d: &Drainage, r: &Routing, area: &[f64], ctx: &EvalContext) -> Vec<Reach> {
+    let (w, _) = d.size();
+    let source = ctx.f64("source_area_km2") * 1.0e6;
+    let (max_w, depth) = (ctx.f64("width_m"), ctx.f64("depth_m"));
+    let pos = |i: usize| [d.spec.x_m((i % w) as u32), d.spec.y_m((i / w) as u32)];
+    let mid = |a: [f64; 2], b: [f64; 2]| [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+    // Size grows with drained area on a log scale, from a tenth at the source
+    // to full size at 1000 × the source area.
+    let size = |i: usize| log_mask(area[i], source, source * 1000.0) as f64;
+    let half_width = |i: usize| 0.5 * max_w * (0.1 + 0.9 * size(i));
+    let deep = |i: usize| depth * (0.3 + 0.7 * size(i));
+    let level = |i: usize| r.filled[i];
+    let is_river = |i: usize| area[i] >= source;
+    let mut reaches = Vec::new();
+    // Downstream-first order keeps the list deterministic.
+    for &i in &r.stack {
+        let j = r.receiver[i];
+        if j == i || !is_river(i) {
+            continue;
+        }
+        let k = r.receiver[j];
+        let (pi, pj) = (pos(i), pos(j));
+        let start = mid(pi, pj);
+        let (end, end_level, end_hw, end_depth) = if k == j {
+            (pj, level(j), half_width(j), deep(j))
+        } else {
+            (
+                mid(pj, pos(k)),
+                0.5 * (level(j) + level(k)),
+                half_width(j),
+                deep(j),
+            )
+        };
+        let start_level = 0.5 * (level(i) + level(j));
+        let (start_hw, start_depth) = (0.5 * (half_width(i) + half_width(j)), 0.5 * (deep(i) + deep(j)));
+        let point = |t: f64| {
+            let u = 1.0 - t;
+            [
+                u * u * start[0] + 2.0 * u * t * pj[0] + t * t * end[0],
+                u * u * start[1] + 2.0 * u * t * pj[1] + t * t * end[1],
+            ]
+        };
+        let lerp = |a: f64, b: f64, t: f64| a + (b - a) * t;
+        for p in 0..PIECES {
+            let (t0, t1) = (p as f64 / PIECES as f64, (p + 1) as f64 / PIECES as f64);
+            reaches.push(Reach {
+                a: point(t0),
+                b: point(t1),
+                level: [lerp(start_level, end_level, t0), lerp(start_level, end_level, t1)],
+                half_width: [lerp(start_hw, end_hw, t0), lerp(start_hw, end_hw, t1)],
+                depth: [lerp(start_depth, end_depth, t0), lerp(start_depth, end_depth, t1)],
+            });
+        }
+    }
+    // Headwaters: from each river cell no river flows into, to the middle
+    // of its first link.
+    let mut fed = vec![false; area.len()];
+    for &i in &r.stack {
+        if is_river(i) && r.receiver[i] != i {
+            fed[r.receiver[i]] = true;
+        }
+    }
+    for &i in &r.stack {
+        let j = r.receiver[i];
+        if j == i || !is_river(i) || fed[i] {
+            continue;
+        }
+        let pi = pos(i);
+        reaches.push(Reach {
+            a: pi,
+            b: mid(pi, pos(j)),
+            level: [level(i), 0.5 * (level(i) + level(j))],
+            half_width: [half_width(i), 0.5 * (half_width(i) + half_width(j))],
+            depth: [deep(i), 0.5 * (deep(i) + deep(j))],
+        });
+    }
+    reaches
+}
+
+impl NodeKind for Rivers {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let t = terrain(ctx)?;
+        ctx.report_progress(0.0);
+        let d = Drainage::new(ctx, t);
+        let [dx, dy] = d.spec.cell_size_m();
+        let r = d.route();
+        check_cancel(ctx)?;
+        let area = hydro::accumulate_d8(&r, dx * dy);
+        let reaches = river_reaches(&d, &r, &area, ctx);
+        check_cancel(ctx)?;
+        ctx.report_progress(0.4);
+
+        let spec = ctx.spec;
+        let (w, ht) = (spec.width as usize, spec.height as usize);
+        let bank = ctx.f64("bank_width_m");
+        let [cx, cy] = spec.cell_size_m();
+        // Bucket reaches by blocks of rows; each block is then independent.
+        const BLOCK: usize = 32;
+        let blocks = ht.div_ceil(BLOCK);
+        let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); blocks];
+        let row_of = |y: f64| (y - spec.origin_m[1]) / cy;
+        for (n, reach) in reaches.iter().enumerate() {
+            let rad = reach.radius(bank);
+            let lo = row_of(reach.a[1].min(reach.b[1]) - rad).floor().max(0.0) as usize;
+            let hi = (row_of(reach.a[1].max(reach.b[1]) + rad).ceil().max(0.0) as usize).min(ht - 1);
+            if lo > hi {
+                continue;
+            }
+            for bucket in &mut buckets[lo / BLOCK..=hi / BLOCK] {
+                bucket.push(n as u32);
+            }
+        }
+
+        let mut height = t.data.clone();
+        let mut surface = t.data.clone();
+        let mut river = vec![0.0f32; spec.len()];
+        let mut riverbank = vec![0.0f32; spec.len()];
+        height
+            .par_chunks_mut(w * BLOCK)
+            .zip(surface.par_chunks_mut(w * BLOCK))
+            .zip(river.par_chunks_mut(w * BLOCK))
+            .zip(riverbank.par_chunks_mut(w * BLOCK))
+            .enumerate()
+            .for_each(|(block, (((height, surface), river), riverbank))| {
+                let j0 = block * BLOCK;
+                let rows = height.len() / w;
+                let mut water_level = vec![f64::NEG_INFINITY; height.len()];
+                for &n in &buckets[block] {
+                    let reach = &reaches[n as usize];
+                    let rad = reach.radius(bank);
+                    let (x0, x1) = (reach.a[0].min(reach.b[0]) - rad, reach.a[0].max(reach.b[0]) + rad);
+                    let (y0, y1) = (reach.a[1].min(reach.b[1]) - rad, reach.a[1].max(reach.b[1]) + rad);
+                    let i_lo = ((x0 - spec.origin_m[0]) / cx).floor().max(0.0) as usize;
+                    let i_hi = (((x1 - spec.origin_m[0]) / cx).ceil().max(0.0) as usize).min(w - 1);
+                    let r_lo = (row_of(y0).floor().max(j0 as f64) as usize).max(j0);
+                    let r_hi = (row_of(y1).ceil().max(0.0) as usize).min(j0 + rows - 1);
+                    let (ax, ay) = (reach.b[0] - reach.a[0], reach.b[1] - reach.a[1]);
+                    let len2 = ax * ax + ay * ay;
+                    for j in r_lo..=r_hi {
+                        let y = spec.y_m(j as u32);
+                        for i in i_lo..=i_hi {
+                            let x = spec.x_m(i as u32);
+                            let (px, py) = (x - reach.a[0], y - reach.a[1]);
+                            let s = if len2 > 0.0 {
+                                ((px * ax + py * ay) / len2).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            };
+                            let (qx, qy) = (px - s * ax, py - s * ay);
+                            let dist = (qx * qx + qy * qy).sqrt();
+                            let hw = reach.half_width[0] + (reach.half_width[1] - reach.half_width[0]) * s;
+                            if dist >= hw + bank {
+                                continue;
+                            }
+                            let level = reach.level[0] + (reach.level[1] - reach.level[0]) * s;
+                            let depth = reach.depth[0] + (reach.depth[1] - reach.depth[0]) * s;
+                            let k = (j - j0) * w + i;
+                            let h = t.data[j * w + i] as f64;
+                            let target = if dist < hw {
+                                let u = dist / hw;
+                                level - depth * (1.0 - u * u)
+                            } else if bank > 0.0 {
+                                let u = ((dist - hw) / bank) as f32;
+                                level + smoothstep(0.0, 1.0, u) as f64 * (h - level)
+                            } else {
+                                h
+                            };
+                            height[k] = height[k].min(target.min(h) as f32);
+                            if dist < hw {
+                                // Soft over the last metre of the bank edge.
+                                river[k] = river[k].max(((hw - dist) as f32 + 0.5).clamp(0.0, 1.0));
+                                water_level[k] = water_level[k].max(level);
+                            } else if bank > 0.0 {
+                                let u = ((dist - hw) / bank) as f32;
+                                riverbank[k] = riverbank[k].max(1.0 - smoothstep(0.0, 1.0, u));
+                            }
+                        }
+                    }
+                }
+                for k in 0..height.len() {
+                    riverbank[k] *= 1.0 - river[k];
+                    surface[k] = if water_level[k] > height[k] as f64 {
+                        water_level[k] as f32
+                    } else {
+                        height[k]
+                    };
+                }
+            });
+        ctx.report_progress(1.0);
+        Ok(Outputs::from([
+            ("height".into(), heightfield(Grid { spec, data: height })),
+            ("water_surface".into(), heightfield(Grid { spec, data: surface })),
+            ("river".into(), mask(Grid { spec, data: river })),
+            (
+                "riverbank".into(),
+                mask(Grid {
+                    spec,
+                    data: riverbank,
+                }),
+            ),
+        ]))
+    }
+}
+
 // ---- Flow -------------------------------------------------------------------
 
 /// Tarboton's D-infinity facets: (cardinal neighbour, diagonal neighbour).
