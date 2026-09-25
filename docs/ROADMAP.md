@@ -147,6 +147,12 @@ Differences from the plan:
 
 **Goal:** terrain-aware water features and the masks that describe them.
 
+**Status (25 Sep 2026):** built on the `v0.5-water` branch; not merged or released. Details, methods and limits are in [water.md](water.md).
+
+- *Done and tested:* Flow (D8 or D-infinity accumulation, direction, basins), Rivers (carved, meandering channels with Water surface, River and Riverbank), Lakes (spill-level filling with sediment infill, Water surface, Lakes, Shore), Sea (edge-connected flooding, beaches, Shallows, Shoreline), Snow (altitude, shaded side, slope, melt, snow depth) and Wetness (wetness index, Water distance). The 3D view draws the water of Rivers, Lakes and Sea over any terrain made with them. Drainage moved to a module shared with Hydraulic Erosion, whose output is unchanged (same golden hash).
+- *Exit criteria:* the *River coast* example (mountain → erosion → crater → rivers → lakes → sea → snow) has rivers running to the sea at the world's edges, a crater lake, and exports the River, Lakes, Sea, Shoreline and Snow masks. Snow lies on the high ground and reaches lower on slopes facing the shaded side (up in the 2D view). Checked with rendered masks and the app's 3D view on Windows, Godot 4.7.2; Linux and macOS are left to CI.
+- *Limits:* rivers follow D8 routing, so on smooth uneroded slopes they keep some 45° runs; all water nodes are CPU-only.
+
 **Deliverables**
 
 - Flow accumulation and flow direction (D8/D-infinity) nodes; watershed/basin mask.

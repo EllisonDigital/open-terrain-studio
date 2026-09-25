@@ -150,6 +150,18 @@ func run() -> void:
 		await frames(10)
 		await shot("10_example_%d_3d" % i)
 
+	# Water: the River coast example draws its sea, lakes and rivers.
+	main._open_example(main.EXAMPLES.size() - 1)
+	check(await wait_preview(main), "river coast previews")
+	check(main.view._water.visible, "water drawn over the river coast")
+	main._view_node("n_0005")
+	check(await wait_preview(main), "sea height")
+	check(main.view._water.visible, "water drawn over the sea's height")
+	main._output_picker.select(2)
+	main._output_picker.item_selected.emit(2)
+	check(await wait_preview(main), "sea mask")
+	check(not main.view._water.visible, "no water over a mask")
+
 	# Erosion: pick each output of Hydraulic Erosion from the toolbar.
 	main._open_example(3)
 	check(await wait_preview(main), "eroded strata previews")

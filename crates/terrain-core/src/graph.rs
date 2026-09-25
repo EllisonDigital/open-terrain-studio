@@ -258,6 +258,47 @@ impl Graph {
         seen
     }
 
+    /// Nodes that put water on the terrain `id` produces, for drawing water in
+    /// the 3D view: `id` and every node upstream with both a `height` and a
+    /// `water_surface` Heightfield output (Rivers, Lakes, Sea), in id order.
+    pub fn water_sources(&self, registry: &NodeRegistry, id: &str) -> Vec<NodeId> {
+        use crate::node::PortType::Heightfield;
+        self.upstream_with(
+            registry,
+            id,
+            &[("height", Heightfield), ("water_surface", Heightfield)],
+        )
+    }
+
+    /// Nodes that put snow on the terrain `id` produces, for drawing it in the
+    /// 3D view: `id` and every node upstream with a `height` Heightfield and a
+    /// `snow` Mask output (Snow), in id order.
+    pub fn snow_sources(&self, registry: &NodeRegistry, id: &str) -> Vec<NodeId> {
+        use crate::node::PortType::{Heightfield, Mask};
+        self.upstream_with(registry, id, &[("height", Heightfield), ("snow", Mask)])
+    }
+
+    /// `id` and the nodes upstream of it that have every one of `outputs`.
+    fn upstream_with(
+        &self,
+        registry: &NodeRegistry,
+        id: &str,
+        outputs: &[(&str, crate::node::PortType)],
+    ) -> Vec<NodeId> {
+        let mut ids = self.upstream(id);
+        ids.insert(id.to_string());
+        ids.into_iter()
+            .filter(|n| {
+                let Some(schema) = self.nodes.get(n).and_then(|n| registry.schema(&n.type_id)) else {
+                    return false;
+                };
+                outputs
+                    .iter()
+                    .all(|(key, ty)| schema.output(key).is_some_and(|o| o.ty == *ty))
+            })
+            .collect()
+    }
+
     /// The terrain a mask output of `id` belongs to, for draping the mask over
     /// it in the 3D view: the node's own Heightfield output if it has one (e.g.
     /// an erosion node's Height next to its Flow mask), otherwise the nearest

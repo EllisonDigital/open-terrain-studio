@@ -22,6 +22,9 @@ uniform int view_mode = 0;
 uniform sampler2D overlay_tex : filter_linear, repeat_disable;
 uniform bool show_overlay = false;
 uniform float overlay_opacity = 0.85;
+// Snow cover (0..1) from Snow nodes, painted white over the ground.
+uniform sampler2D snow_tex : filter_linear, repeat_disable;
+uniform bool show_snow = false;
 
 varying vec2 terrain_uv;
 varying float height_m;
@@ -81,6 +84,10 @@ void fragment() {
 		albedo = mix(low, high, smoothstep(0.2, 0.7, t));
 		albedo = mix(albedo, rock, smoothstep(0.22, 0.45, slope));
 		albedo = mix(albedo, snow, smoothstep(0.78, 0.9, t) * (1.0 - smoothstep(0.25, 0.45, slope)));
+	}
+	if (show_snow) {
+		float s = clamp(texture(snow_tex, terrain_uv).r, 0.0, 1.0);
+		albedo = mix(albedo, vec3(0.80, 0.82, 0.86), s);
 	}
 	if (show_overlay) {
 		float m = clamp(texture(overlay_tex, terrain_uv).r, 0.0, 1.0);

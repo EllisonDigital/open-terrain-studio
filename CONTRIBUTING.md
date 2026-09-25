@@ -52,7 +52,7 @@ Nodes are plain Rust: one struct, one schema, one `evaluate` function. The inspe
 generated from the schema, so **no Godot code is needed**.
 
 1. Add the node to `crates/terrain-nodes/src/` in the module for its category (`primitives.rs`, `noise/`,
-   `terrain.rs`, `adjust.rs`, `data.rs`); `basic.rs` has small examples, `common.rs` shared parameters.
+   `terrain.rs`, `adjust.rs`, `data.rs`, `erosion/`, `water.rs`); `basic.rs` has small examples, `common.rs` shared parameters.
 2. Give it a permanent `type_id` like `noise.ridged`. Never rename it later: project files store it.
 3. Declare parameters with `ParamDef`. **All sizes are metres** (`ParamDef::metres`), never pixels; directions
    are degrees with 0° along +X and 90° along +Y.
