@@ -5,6 +5,7 @@
 extends SubViewportContainer
 
 const TERRAIN_SHADER := preload("res://shaders/terrain.gdshader")
+const WATER_SHADER := preload("res://shaders/water.gdshader")
 ## Mesh vertices per side are capped; the fragment shader samples the full
 ## heightmap for lighting, so detail survives at higher preview resolutions.
 const MAX_MESH_RES := 1024
@@ -21,6 +22,9 @@ var _terrain: MeshInstance3D
 var _material: ShaderMaterial
 var _texture: ImageTexture
 var _overlay: ImageTexture
+var _water: MeshInstance3D
+var _water_material: ShaderMaterial
+var _water_texture: ImageTexture
 var _mesh_res := 0
 var _exaggeration := 1.0
 
@@ -82,6 +86,14 @@ func _ready() -> void:
 	_terrain.visible = false
 	_viewport.add_child(_terrain)
 
+	_water_material = ShaderMaterial.new()
+	_water_material.shader = WATER_SHADER
+	_water = MeshInstance3D.new()
+	_water.material_override = _water_material
+	_water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_water.visible = false
+	_viewport.add_child(_water)
+
 	_camera = Camera3D.new()
 	_camera.near = 1.0
 	_viewport.add_child(_camera)
@@ -98,6 +110,7 @@ func set_world(size_m: float, h_min: float, h_max: float) -> void:
 	_material.set_shader_parameter("world_size", world_size)
 	_material.set_shader_parameter("height_min", height_min)
 	_material.set_shader_parameter("height_max", height_max)
+	_water_material.set_shader_parameter("world_size", world_size)
 	_camera.far = world_size * 20.0
 	# Light aerial haze, scaled so every world size looks the same.
 	_env.fog_density = 0.12 / world_size
@@ -133,6 +146,18 @@ func show_preview(preview: TerrainPreview) -> void:
 	if res != _mesh_res:
 		_build_mesh(res)
 	_terrain.visible = true
+	_show_water(null if is_mask else preview.get_water_image())
+
+
+## Water from Rivers, Lakes and Sea over the terrain shown (null: none).
+func _show_water(level: Image) -> void:
+	if level == null:
+		_water.visible = false
+		return
+	_water_texture = _update_texture(_water_texture, level)
+	_water_material.set_shader_parameter("water_tex", _water_texture)
+	_water_material.set_shader_parameter("height_tex", _texture)
+	_water.visible = true
 
 
 func _update_texture(tex: ImageTexture, img: Image) -> ImageTexture:
@@ -144,6 +169,7 @@ func _update_texture(tex: ImageTexture, img: Image) -> ImageTexture:
 
 func clear() -> void:
 	_terrain.visible = false
+	_water.visible = false
 
 
 func set_view_mode(mode: int) -> void:
@@ -153,7 +179,9 @@ func set_view_mode(mode: int) -> void:
 func set_exaggeration(value: float) -> void:
 	_exaggeration = value
 	_material.set_shader_parameter("exaggeration", value)
+	_water_material.set_shader_parameter("exaggeration", value)
 	_terrain.set_custom_aabb(_terrain_aabb(value))
+	_water.set_custom_aabb(_terrain_aabb(value))
 
 
 func set_sun_angle(azimuth_deg: float, elevation_deg: float) -> void:
@@ -192,6 +220,8 @@ func _build_mesh(res: int) -> void:
 	plane.subdivide_depth = res - 2
 	_terrain.mesh = plane
 	_terrain.set_custom_aabb(_terrain_aabb(_exaggeration))
+	_water.mesh = plane
+	_water.set_custom_aabb(_terrain_aabb(_exaggeration))
 	_mesh_res = res
 
 

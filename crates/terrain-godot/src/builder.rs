@@ -11,6 +11,11 @@ use crate::preview::{PreviewData, TerrainPreview};
 use crate::project::TerrainProject;
 use crate::{cache, registry};
 
+/// Water level marking dry ground in [`PreviewData::water`].
+pub const DRY: f32 = -1.0e6;
+/// Water shallower than this isn't drawn.
+const WATER_MIN_DEPTH_M: f32 = 0.01;
+
 /// Evaluates nodes on a worker thread. Add it to the scene tree: results are
 /// delivered by signals from `_process`, on the main thread.
 ///
@@ -134,10 +139,33 @@ impl TerrainBuilder {
             } else {
                 None
             };
+            // Water to draw over a terrain: the highest water surface of the
+            // Rivers, Lakes and Sea nodes it was made with, where they have water.
+            let water = if ty == PortType::Heightfield {
+                let mut level: Option<Vec<f32>> = None;
+                for source in snapshot.graph.water_sources(registry(), &n2) {
+                    let (Ok((height, _)), Ok((surface, _))) = (
+                        eval(&source, "height", None),
+                        eval(&source, "water_surface", None),
+                    ) else {
+                        continue;
+                    };
+                    let level = level.get_or_insert_with(|| vec![DRY; grid.data.len()]);
+                    for ((l, s), h) in level.iter_mut().zip(&surface.data).zip(&height.data) {
+                        if *s > *h + WATER_MIN_DEPTH_M {
+                            *l = l.max(*s);
+                        }
+                    }
+                }
+                level.map(|data| Arc::new(Grid { spec, data }))
+            } else {
+                None
+            };
             Ok(PreviewData {
                 grid,
                 port_type: ty,
                 base,
+                water,
                 computed: cache().stats().misses - misses_before,
                 millis: started.elapsed().as_secs_f64() * 1000.0,
                 gpu: gpu.map(|g| g.name()),

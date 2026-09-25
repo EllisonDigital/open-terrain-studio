@@ -42,11 +42,27 @@
       }
     },
     {
+      "id": "n_0007",
+      "type": "terrain.crater",
+      "type_version": 1,
+      "pos": [
+        640,
+        0
+      ],
+      "params": {
+        "radius_m": 550,
+        "depth_m": 140,
+        "rim_height_m": 40,
+        "pos_x_m": -1500,
+        "pos_y_m": 1300
+      }
+    },
+    {
       "id": "n_0003",
       "type": "simulate.rivers",
       "type_version": 1,
       "pos": [
-        640,
+        960,
         0
       ],
       "params": {
@@ -59,7 +75,7 @@
       "type": "simulate.lakes",
       "type_version": 1,
       "pos": [
-        960,
+        1280,
         0
       ],
       "params": {
@@ -71,7 +87,7 @@
       "type": "simulate.sea",
       "type_version": 1,
       "pos": [
-        1280,
+        1600,
         0
       ],
       "params": {
@@ -83,27 +99,11 @@
       "type": "simulate.snow",
       "type_version": 1,
       "pos": [
-        1600,
+        1920,
         0
       ],
       "params": {
         "snow_line_m": 800
-      }
-    },
-    {
-      "id": "n_0007",
-      "type": "terrain.crater",
-      "type_version": 1,
-      "pos": [
-        480,
-        220
-      ],
-      "params": {
-        "radius_m": 550,
-        "depth_m": 140,
-        "rim_height_m": 40,
-        "pos_x_m": -1500,
-        "pos_y_m": 1300
       }
     }
   ],

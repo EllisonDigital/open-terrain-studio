@@ -11,6 +11,10 @@ pub struct PreviewData {
     pub port_type: PortType,
     /// For a mask: the terrain it was computed from, and that node's id.
     pub base: Option<(Arc<Grid>, String)>,
+    /// For a heightfield: the water level over it in metres
+    /// ([`crate::builder::DRY`] where there is no water), if any node it was
+    /// made with adds water.
+    pub water: Option<Arc<Grid>>,
     /// Nodes computed (not taken from the cache) for this preview.
     pub computed: u64,
     pub millis: f64,
@@ -74,6 +78,13 @@ impl TerrainPreview {
     #[func]
     fn get_base_image(&self) -> Option<Gd<Image>> {
         self.data.base.as_ref().and_then(|(g, _)| grid_image(g))
+    }
+
+    /// For a heightfield made with Rivers, Lakes or Sea: the water level in
+    /// metres (FORMAT_RF), -1,000,000 where it's dry. Null without water.
+    #[func]
+    fn get_water_image(&self) -> Option<Gd<Image>> {
+        self.data.water.as_ref().and_then(|g| grid_image(g))
     }
 
     /// Node id of the base terrain, or "".
