@@ -258,10 +258,24 @@ impl Graph {
         seen
     }
 
-    /// The nearest Heightfield output upstream of `id` (breadth-first, inputs
-    /// in port order): the terrain a mask was computed from, for draping the
-    /// mask over it in the 3D view. `None` if there isn't one.
+    /// The terrain a mask output of `id` belongs to, for draping the mask over
+    /// it in the 3D view: the node's own Heightfield output if it has one (e.g.
+    /// an erosion node's Height next to its Flow mask), otherwise the nearest
+    /// Heightfield output upstream (breadth-first, inputs in port order).
+    /// `None` if there isn't one.
     pub fn base_heightfield(&self, registry: &NodeRegistry, id: &str) -> Option<(NodeId, String)> {
+        let own = self
+            .nodes
+            .get(id)
+            .and_then(|n| registry.schema(&n.type_id))
+            .and_then(|s| {
+                s.outputs
+                    .iter()
+                    .find(|o| o.ty == crate::node::PortType::Heightfield)
+            });
+        if let Some(port) = own {
+            return Some((id.to_string(), port.key.clone()));
+        }
         let mut queue = std::collections::VecDeque::from([id.to_string()]);
         let mut seen = BTreeSet::from([id.to_string()]);
         while let Some(n) = queue.pop_front() {

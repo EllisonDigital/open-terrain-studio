@@ -95,7 +95,7 @@ fn every_node_is_resolution_independent() {
     println!("{}", report.join("\n"));
 }
 
-/// Golden hashes of every node's default output at 65². Regenerate after a
+/// Golden hashes of every node's default outputs at 65². Regenerate after a
 /// deliberate change with `OTS_BLESS=1 cargo test -p terrain-nodes --test nodes golden`
 /// and explain the change in the merge request: it changes users' terrains.
 #[test]
@@ -105,8 +105,15 @@ fn golden_hashes() {
     let mut hashes = BTreeMap::new();
     for schema in reg.schemas() {
         let (p, id) = project_for(&reg, &schema.type_id, &dir);
-        let (g, _) = eval(&p, &reg, &id, 65);
-        let bytes: Vec<u8> = g.data.iter().flat_map(|v| v.to_le_bytes()).collect();
+        // Every output, in declared order (single-output nodes: just that one).
+        let spec = terrain_core::GridSpec::full_world(&p.world, 65).unwrap();
+        let out =
+            terrain_core::evaluate_node(&p.graph, &reg, &p.world, spec, &id, &Default::default()).unwrap();
+        let bytes: Vec<u8> = schema
+            .outputs
+            .iter()
+            .flat_map(|o| out[&o.key].grid().data.iter().flat_map(|v| v.to_le_bytes()))
+            .collect();
         hashes.insert(schema.type_id.clone(), format!("{:016x}", fnv1a64(&bytes)));
     }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden/node_hashes.json");

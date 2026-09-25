@@ -526,8 +526,15 @@ fn finds_the_terrain_under_a_mask() {
         base,
         "found through another mask"
     );
-    let lonely = p.graph.add_node(&reg, "noise.perlin", [0.0, 0.0]).unwrap();
+    let lonely = p.graph.add_node(&reg, "data.slope", [0.0, 0.0]).unwrap();
     assert_eq!(p.graph.base_heightfield(&reg, &lonely), None);
+    // A node's own terrain output wins: erosion masks drape over the eroded height.
+    let erosion = p.graph.add_node(&reg, "simulate.hydraulic", [0.0, 0.0]).unwrap();
+    p.graph.connect(&reg, &levels, "out", &erosion, "in").unwrap();
+    assert_eq!(
+        p.graph.base_heightfield(&reg, &erosion),
+        Some((erosion.clone(), "height".to_string()))
+    );
 }
 
 /// The bundled examples (the v0.2 reference landforms) load without warnings,
@@ -558,5 +565,5 @@ fn bundled_examples_load_and_build() {
         build_marked(&p, &reg, 65, &out, &EvalOptions::default()).unwrap();
         std::fs::remove_dir_all(&out).ok();
     }
-    assert_eq!(found, 3);
+    assert_eq!(found, 4);
 }

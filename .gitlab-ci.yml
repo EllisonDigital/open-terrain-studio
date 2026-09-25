@@ -121,6 +121,7 @@ godot-smoke:
     # Godot (4.6 and 4.7) after the import has finished; the import itself is fine.
     - $GODOT --headless --path app --import || true
     - $GODOT --headless --path app --script res://tests/smoke_test.gd
+    - $GODOT --headless --path app --script res://tests/erosion_test.gd
 
 # Same smoke test on the oldest supported Godot (compatibility_minimum = 4.6).
 godot-smoke-min:
@@ -131,6 +132,7 @@ godot-smoke-min:
     - cargo build -p terrain-godot
     - $GODOT --headless --path app --import || true
     - $GODOT --headless --path app --script res://tests/smoke_test.gd
+    - $GODOT --headless --path app --script res://tests/erosion_test.gd
 
 # ---- build: release library per OS ------------------------------------------
 

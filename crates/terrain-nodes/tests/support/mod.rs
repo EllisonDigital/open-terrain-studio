@@ -46,6 +46,15 @@ pub fn project_for(reg: &NodeRegistry, type_id: &str, files: &Path) -> (Project,
         let src = smooth_source(reg, &mut p);
         p.graph.connect(reg, &src, "out", &id, &input.key).unwrap();
     }
+    // Simulations: a short run keeps the all-node checks fast; tests/erosion*.rs
+    // cover full-length erosion.
+    for (key, value) in [("duration_s", 6.0), ("duration_kyr", 100.0), ("detail_m", 32.0)] {
+        if schema.param(key).is_some() {
+            p.graph
+                .set_param(reg, &id, key, ParamValue::Float(value))
+                .unwrap();
+        }
+    }
     if type_id == "primitive.file" {
         let png = test_png(files);
         p.graph
@@ -73,7 +82,7 @@ pub fn smooth_source(reg: &NodeRegistry, p: &mut Project) -> String {
     src
 }
 
-/// Evaluate `node` over the whole world; returns its first output.
+/// Evaluate `node` over the whole world; returns its first declared output.
 pub fn eval(p: &Project, reg: &NodeRegistry, node: &str, res: u32) -> (Arc<Grid>, PortType) {
     eval_with(p, reg, node, res, &EvalOptions::default())
 }

@@ -19,6 +19,7 @@ const EXAMPLES := [
 	["Alpine range", "res://examples/alpine_range.otstudio"],
 	["Canyon", "res://examples/canyon.otstudio"],
 	["Dune field", "res://examples/dune_field.otstudio"],
+	["Eroded strata", "res://examples/eroded_strata.otstudio"],
 ]
 
 enum Menu { NEW, OPEN, SAVE, SAVE_AS, EXPORT, QUIT, WORLD, DOCS, ABOUT, UNDO, REDO, MARK_EXPORT, BUILD, EXAMPLE = 100 }
@@ -37,6 +38,9 @@ var side_tabs: TabContainer
 
 var project_path := ""
 var viewed_id := ""
+## Output of the viewed node shown in the viewport (nodes like Hydraulic
+## Erosion have several: Height, Flow, Wear…). "" = its first output.
+var viewed_port := ""
 var preview_resolution := 512
 var view_2d := false
 
@@ -56,6 +60,8 @@ var _confirm_action: Callable
 var _message: AcceptDialog
 var _edit_menu: PopupMenu
 var _view_switch: OptionButton
+var _output_label: Label
+var _output_picker: OptionButton
 var _last_preview: TerrainPreview
 
 
@@ -222,6 +228,16 @@ func _build_view_toolbar() -> Control:
 	_view_switch.tooltip_text = "3D terrain, or the 2D map with the value under the mouse (Tab)"
 	_view_switch.item_selected.connect(func(i): _set_view_2d(i == 1))
 	bar.add_child(_view_switch)
+
+	_output_label = _label("Output")
+	bar.add_child(_output_label)
+	_output_picker = OptionButton.new()
+	_output_picker.tooltip_text = "Which of the viewed node's outputs to show, export and mark"
+	_output_picker.item_selected.connect(func(i):
+		_select_output(String(_output_picker.get_item_metadata(i))))
+	bar.add_child(_output_picker)
+	_output_label.visible = false
+	_output_picker.visible = false
 
 	bar.add_child(_label("Preview"))
 	var res := OptionButton.new()
@@ -412,6 +428,7 @@ func _restore_ui_state() -> void:
 	if not graph.has_node(viewed):
 		var nodes := graph.get_nodes()
 		viewed = nodes[-1]["id"] if nodes.size() > 0 else ""
+	viewed_port = state.get("viewed_port", "")
 	if state.has("preview_resolution") and int(state["preview_resolution"]) in PREVIEW_RESOLUTIONS:
 		preview_resolution = int(state["preview_resolution"])
 	_after_project_loaded(viewed)
@@ -425,6 +442,7 @@ func _restore_ui_state() -> void:
 func _save_project(path: String) -> bool:
 	project.set_ui_state(JSON.stringify({
 		"viewed_node": viewed_id,
+		"viewed_port": _viewed_port(),
 		"preview_resolution": preview_resolution,
 		"camera": view.get_camera_state(),
 		"view_2d": view_2d,
@@ -450,7 +468,7 @@ func _after_project_loaded(viewed: String) -> void:
 	viewed_id = ""
 	if viewed != "":
 		graph_panel.select_node(viewed)
-		_view_node(viewed)
+		_view_node(viewed, viewed_port)
 	else:
 		inspector.show_world()
 	_update_title()
@@ -478,11 +496,50 @@ func _confirm_discard(action: Callable) -> void:
 
 # ---- viewing & editing ----------------------------------------------------
 
-func _view_node(id: String) -> void:
+## View a node's output (its first output unless `port` names another).
+func _view_node(id: String, port := "") -> void:
 	viewed_id = id
-	graph_panel.set_viewed(id)
+	viewed_port = port
+	_update_output_picker()
+	graph_panel.set_viewed(id, _viewed_port())
 	_show_inspector_for(id)
 	_request_preview()
+
+
+## Show another output of the viewed node.
+func _select_output(port: String) -> void:
+	viewed_port = port
+	graph_panel.set_viewed(viewed_id, _viewed_port())
+	_request_preview()
+
+
+## The viewed output: `viewed_port` if the node still has it, else its first output.
+func _viewed_port() -> String:
+	var outputs := _outputs_of(viewed_id)
+	for o in outputs:
+		if o["key"] == viewed_port:
+			return viewed_port
+	return outputs[0]["key"] if outputs.size() > 0 else ""
+
+
+func _outputs_of(id: String) -> Array:
+	for n in graph.get_nodes():
+		if n["id"] == id:
+			return n["outputs"]
+	return []
+
+
+func _update_output_picker() -> void:
+	var outputs := _outputs_of(viewed_id)
+	_output_picker.clear()
+	var current := _viewed_port()
+	for o in outputs:
+		_output_picker.add_item(o["label"])
+		_output_picker.set_item_metadata(_output_picker.item_count - 1, o["key"])
+		if o["key"] == current:
+			_output_picker.select(_output_picker.item_count - 1)
+	_output_label.visible = outputs.size() > 1
+	_output_picker.visible = outputs.size() > 1
 
 
 func _show_inspector_for(id: String) -> void:
@@ -501,20 +558,13 @@ func _request_preview() -> void:
 		_last_preview = null
 		_stats_label.text = ""
 		return
-	var port := _first_output(viewed_id)
+	var port := _viewed_port()
 	if port == "":
 		_set_status("This node has no output to preview.")
 		return
 	_progress.visible = true
 	_progress.value = 0
 	builder.request_preview(project, viewed_id, port, preview_resolution)
-
-
-func _first_output(id: String) -> String:
-	for n in graph.get_nodes():
-		if n["id"] == id and n["outputs"].size() > 0:
-			return n["outputs"][0]["key"]
-	return ""
 
 
 func _on_node_activated(id: String) -> void:
@@ -588,7 +638,8 @@ func _undo_redo(redo: bool) -> void:
 	_apply_world()
 	if viewed_id != "" and not graph.has_node(viewed_id):
 		viewed_id = ""
-	graph_panel.set_viewed(viewed_id)
+	graph_panel.set_viewed(viewed_id, _viewed_port())
+	_update_output_picker()
 	var shown: String = inspector.get_node_id()
 	if shown != "" and graph.has_node(shown):
 		_show_inspector_for(shown)
@@ -670,7 +721,7 @@ func _start_export() -> void:
 	var res: int = EXPORT_RESOLUTIONS[_export_res.selected]
 	project.set_build_resolution(res)
 	project.set_build_folder(folder)
-	if exporter.request_export(project, viewed_id, _first_output(viewed_id), res, folder, formats):
+	if exporter.request_export(project, viewed_id, _viewed_port(), res, folder, formats):
 		_progress.visible = true
 		_progress.value = 0
 		_set_status("Exporting at %d²…" % res)
@@ -743,7 +794,7 @@ func _on_menu(id: int) -> void:
 			if viewed_id == "":
 				_show_message("Export", "View a node first (click it in the graph).")
 				return
-			var port := _first_output(viewed_id)
+			var port := _viewed_port()
 			var marked := not project.get_export_formats(viewed_id, port).is_empty()
 			project.begin_edit_group("Unmark for export" if marked else "Mark for export")
 			for f in ["exr32", "png16"]:

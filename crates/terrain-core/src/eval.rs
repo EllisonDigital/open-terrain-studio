@@ -16,7 +16,7 @@ use crate::world::World;
 pub struct EvalOptions<'a> {
     /// Set to true from another thread to stop early.
     pub cancel: Option<&'a AtomicBool>,
-    /// Called with overall progress 0..1 after each node finishes.
+    /// Called with overall progress 0..1, including updates within long nodes.
     pub progress: Option<&'a (dyn Fn(f32) + Sync)>,
     /// Reuse and store node results here. Without a cache everything is computed.
     pub cache: Option<&'a EvalCache>,
@@ -99,8 +99,14 @@ pub fn evaluate_node(
         let outputs = match cached {
             Some(outputs) => outputs,
             None => {
+                let node_progress = |fraction: f32| {
+                    if let Some(p) = opts.progress {
+                        p((n as f32 + fraction) / total);
+                    }
+                };
                 let mut ctx = EvalContext::new(world, spec, node_seed, id, schema, &node.params, inputs);
                 ctx.cancel = opts.cancel;
+                ctx.progress = Some(&node_progress);
                 ctx.base_dir = opts.base_dir;
                 let outputs = kind.evaluate(&ctx).map_err(|e| match e {
                     CoreError::Cancelled | CoreError::MissingInput { .. } => e,
@@ -109,6 +115,10 @@ pub fn evaluate_node(
                         message: other.to_string(),
                     },
                 })?;
+                // A node that stopped early may return partial results: never cache them.
+                if ctx.is_cancelled() {
+                    return Err(CoreError::Cancelled);
+                }
                 if let Some(c) = opts.cache {
                     c.insert(key, &outputs);
                 }
