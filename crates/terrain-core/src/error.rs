@@ -33,7 +33,7 @@ pub enum CoreError {
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("image export error: {0}")]
+    #[error("image error: {0}")]
     Image(String),
 }
 

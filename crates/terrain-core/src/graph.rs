@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
-use crate::node::NodeRegistry;
+use crate::node::{NodeRegistry, PortDef};
 use crate::params::ParamValue;
 
 /// Stable node identifier, e.g. `n_0003`. Used for seeding and never reused.
@@ -19,6 +19,8 @@ pub struct NodeInstance {
     pub pos: [f32; 2],
     /// Only parameters that differ from the default need to be present.
     pub params: BTreeMap<String, ParamValue>,
+    /// Drivable parameters shown as input ports (see `ParamDef::drivable`).
+    pub exposed: BTreeSet<String>,
 }
 
 /// A connection from an output port to an input port.
@@ -80,9 +82,45 @@ impl Graph {
                 type_version: schema.type_version,
                 pos,
                 params: BTreeMap::new(),
+                exposed: BTreeSet::new(),
             },
         );
         Ok(id)
+    }
+
+    /// Input ports of a node: its schema's inputs plus exposed parameter ports.
+    pub fn input_ports(&self, registry: &NodeRegistry, id: &str) -> Result<Vec<PortDef>> {
+        let n = self
+            .nodes
+            .get(id)
+            .ok_or_else(|| CoreError::NodeNotFound(id.into()))?;
+        let schema = registry
+            .schema(&n.type_id)
+            .ok_or_else(|| CoreError::UnknownNodeType(n.type_id.clone()))?;
+        Ok(schema.input_ports(&n.exposed))
+    }
+
+    /// Show or hide a drivable parameter as an input port. Hiding it removes
+    /// any link into the port.
+    pub fn set_exposed(&mut self, registry: &NodeRegistry, id: &str, key: &str, exposed: bool) -> Result<()> {
+        let type_id = self.node_mut(id)?.type_id.clone();
+        let schema = registry
+            .schema(&type_id)
+            .ok_or_else(|| CoreError::UnknownNodeType(type_id.clone()))?;
+        if !schema.param(key).is_some_and(|d| d.drivable) {
+            return Err(CoreError::InvalidParam {
+                param: key.into(),
+                reason: "this parameter can't be driven by a mask".into(),
+            });
+        }
+        let node = self.node_mut(id)?;
+        if exposed {
+            node.exposed.insert(key.into());
+        } else {
+            node.exposed.remove(key);
+            self.disconnect(id, &crate::node::param_port_key(key));
+        }
+        Ok(())
     }
 
     /// Insert a node exactly as given (used when loading projects).
@@ -154,24 +192,23 @@ impl Graph {
         to_port: &str,
     ) -> Result<()> {
         let describe = || (format!("{from}.{from_port}"), format!("{to}.{to_port}"));
-        let schema_of = |id: &str| -> Result<_> {
-            let n = self
-                .nodes
-                .get(id)
-                .ok_or_else(|| CoreError::NodeNotFound(id.into()))?;
-            registry
-                .schema(&n.type_id)
-                .ok_or_else(|| CoreError::UnknownNodeType(n.type_id.clone()))
-        };
-        let out_ty = schema_of(from)?
+        let from_node = self
+            .nodes
+            .get(from)
+            .ok_or_else(|| CoreError::NodeNotFound(from.into()))?;
+        let out_ty = registry
+            .schema(&from_node.type_id)
+            .ok_or_else(|| CoreError::UnknownNodeType(from_node.type_id.clone()))?
             .output(from_port)
             .ok_or_else(|| CoreError::PortNotFound {
                 node: from.into(),
                 port: from_port.into(),
             })?
             .ty;
-        let in_ty = schema_of(to)?
-            .input(to_port)
+        let in_ty = self
+            .input_ports(registry, to)?
+            .into_iter()
+            .find(|p| p.key == to_port)
             .ok_or_else(|| CoreError::PortNotFound {
                 node: to.into(),
                 port: to_port.into(),

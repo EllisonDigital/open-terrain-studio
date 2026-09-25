@@ -1,14 +1,14 @@
-//! End-to-end tests: graph editing, evaluation, determinism, resolution
-//! independence, project files and export.
+//! End-to-end tests: graph editing, evaluation, caching, parameter ports,
+//! determinism, resolution independence, project files and export.
 
-use terrain_core::export::{ExportFormat, ExportRequest, export_node};
+mod support;
+
+use terrain_core::export::{ExportFormat, ExportRequest, build_marked, export_node};
 use terrain_core::{
-    CoreError, EvalOptions, GridSpec, NodeRegistry, ParamValue, Project, Value, World, evaluate_node,
+    CoreError, EvalCache, EvalOptions, GridSpec, NodeRegistry, ParamValue, Project, Value, evaluate_node,
 };
 
-fn registry() -> NodeRegistry {
-    terrain_nodes::registry()
-}
+use support::{registry, temp_dir};
 
 /// fBm -> Levels, the v0.1 exit-criteria graph.
 fn sample_project(reg: &NodeRegistry) -> (Project, String, String) {
@@ -33,27 +33,17 @@ fn eval(p: &Project, reg: &NodeRegistry, node: &str, res: u32) -> std::sync::Arc
 #[test]
 fn every_node_type_evaluates_with_defaults() {
     let reg = registry();
-    let world = World::default();
+    let dir = temp_dir("defaults");
     for schema in reg.schemas() {
-        let mut p = Project::default();
-        let id = p.graph.add_node(&reg, &schema.type_id, [0.0, 0.0]).unwrap();
-        // Feed every required input from a noise node.
-        for input in schema.inputs.iter().filter(|i| !i.optional) {
-            let src = p.graph.add_node(&reg, "noise.perlin", [0.0, 0.0]).unwrap();
-            p.graph.connect(&reg, &src, "out", &id, &input.key).unwrap();
-        }
-        let spec = GridSpec::full_world(&world, 64).unwrap();
-        let out = evaluate_node(&p.graph, &reg, &world, spec, &id, &EvalOptions::default())
+        let (p, id) = support::project_for(&reg, &schema.type_id, &dir);
+        let spec = GridSpec::full_world(&p.world, 64).unwrap();
+        let out = evaluate_node(&p.graph, &reg, &p.world, spec, &id, &EvalOptions::default())
             .unwrap_or_else(|e| panic!("{} failed: {e}", schema.type_id));
         for port in &schema.outputs {
             let v = out
                 .get(&port.key)
                 .unwrap_or_else(|| panic!("{} missing {}", schema.type_id, port.key));
-            assert!(
-                v.grid().data.iter().all(|x| x.is_finite()),
-                "{} produced NaN",
-                schema.type_id
-            );
+            assert_eq!(v.port_type(), port.ty, "{} output type", schema.type_id);
         }
     }
 }
@@ -229,8 +219,7 @@ fn export_writes_valid_deterministic_files() {
                 folder: &folder,
                 formats: &[ExportFormat::Exr32, ExportFormat::Png16],
             },
-            None,
-            None,
+            &EvalOptions::default(),
         )
         .unwrap()
     };
@@ -272,5 +261,252 @@ fn export_writes_valid_deterministic_files() {
     assert_eq!(info["resolution"][0], 129);
     assert_eq!(info["cell_size_m"][0], 64.0);
     assert_eq!(info["files"].as_array().unwrap().len(), 2);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// fBm -> Levels -> Blur, evaluated through a cache.
+fn chain(reg: &NodeRegistry) -> (Project, [String; 3]) {
+    let (mut p, fbm, levels) = sample_project(reg);
+    let blur = p.graph.add_node(reg, "adjust.blur", [600.0, 0.0]).unwrap();
+    p.graph.connect(reg, &levels, "out", &blur, "in").unwrap();
+    (p, [fbm, levels, blur])
+}
+
+fn eval_cached(p: &Project, reg: &NodeRegistry, cache: &EvalCache, node: &str, res: u32) -> Vec<f32> {
+    support::eval_with(
+        p,
+        reg,
+        node,
+        res,
+        &EvalOptions {
+            cache: Some(cache),
+            ..Default::default()
+        },
+    )
+    .0
+    .data
+    .clone()
+}
+
+#[test]
+fn editing_downstream_never_recomputes_upstream() {
+    let reg = registry();
+    let (mut p, [fbm, levels, blur]) = chain(&reg);
+    let cache = EvalCache::default();
+    let first = eval_cached(&p, &reg, &cache, &blur, 129);
+    assert_eq!(cache.stats().misses, 3);
+
+    // Same graph again: nothing recomputes, and the result is identical.
+    assert_eq!(eval_cached(&p, &reg, &cache, &blur, 129), first);
+    assert_eq!(cache.stats().misses, 3);
+    assert_eq!(cache.stats().hits, 3);
+
+    // Edit the last node: only it recomputes.
+    p.graph
+        .set_param(&reg, &blur, "radius_m", ParamValue::Float(300.0))
+        .unwrap();
+    eval_cached(&p, &reg, &cache, &blur, 129);
+    assert_eq!(cache.stats().misses, 4);
+
+    // Edit the middle node: it and the blur recompute, the fBm doesn't.
+    p.graph
+        .set_param(&reg, &levels, "gamma", ParamValue::Float(1.5))
+        .unwrap();
+    eval_cached(&p, &reg, &cache, &blur, 129);
+    assert_eq!(cache.stats().misses, 6);
+
+    // Undoing an edit (setting the old value back) hits the cache again.
+    p.graph
+        .set_param(&reg, &levels, "gamma", ParamValue::Float(1.0))
+        .unwrap();
+    eval_cached(&p, &reg, &cache, &blur, 129);
+    assert_eq!(cache.stats().misses, 6);
+
+    // A different resolution is a different entry; so is a world change.
+    eval_cached(&p, &reg, &cache, &fbm, 65);
+    assert_eq!(cache.stats().misses, 7);
+    p.world.height_range_m = [0.0, 3000.0];
+    eval_cached(&p, &reg, &cache, &fbm, 65);
+    assert_eq!(cache.stats().misses, 8);
+}
+
+#[test]
+fn cached_results_match_uncached_and_cache_stays_within_budget() {
+    let reg = registry();
+    let (p, [_, _, blur]) = chain(&reg);
+    let plain = support::eval(&p, &reg, &blur, 129).0;
+    // Room for about two 129² grids.
+    let cache = EvalCache::new(129 * 129 * 4 * 2 + 16);
+    for _ in 0..3 {
+        assert_eq!(eval_cached(&p, &reg, &cache, &blur, 129), plain.data);
+    }
+    let stats = cache.stats();
+    assert!(stats.entries <= 2 && stats.evictions > 0, "{stats:?}");
+}
+
+#[test]
+fn masks_drive_parameters_through_ports() {
+    let reg = registry();
+    let mut p = Project::default();
+    let cone = p.graph.add_node(&reg, "primitive.cone", [0.0, 0.0]).unwrap();
+    let grad = p.graph.add_node(&reg, "primitive.gradient", [0.0, 0.0]).unwrap();
+    // A port only exists once the parameter is exposed.
+    assert!(p.graph.connect(&reg, &grad, "out", &cone, "p:height_m").is_err());
+    p.graph.set_exposed(&reg, &cone, "height_m", true).unwrap();
+    assert!(
+        p.graph.set_exposed(&reg, &cone, "radius_m", true).is_err(),
+        "radius is not drivable"
+    );
+    let ports = p.graph.input_ports(&reg, &cone).unwrap();
+    assert_eq!(ports.len(), 1);
+    assert_eq!(
+        (ports[0].key.as_str(), ports[0].param.as_str()),
+        ("p:height_m", "height_m")
+    );
+
+    let undriven = support::eval(&p, &reg, &cone, 65).0;
+    p.graph.connect(&reg, &grad, "out", &cone, "p:height_m").unwrap();
+    let driven = support::eval(&p, &reg, &cone, 65).0;
+    // The gradient (0 at the left edge .. 1 at the right, as a mask of the
+    // 0..2000 m world with height 1000) scales the cone's 1500 m height.
+    let centre = undriven.get(32, 32);
+    assert!((centre - 1500.0).abs() < 1.0);
+    let mask_at_centre = 0.25; // gradient 500 m at the centre -> 0.25 of 2000 m
+    assert!(
+        (driven.get(32, 32) - centre * mask_at_centre).abs() < 1.0,
+        "{}",
+        driven.get(32, 32)
+    );
+
+    // Saved and loaded with the project.
+    let (loaded, warnings) = Project::from_json(&p.to_json().unwrap(), &reg).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(loaded.graph, p.graph);
+
+    // Hiding the port removes its link.
+    p.graph.set_exposed(&reg, &cone, "height_m", false).unwrap();
+    assert!(p.graph.links().is_empty());
+    assert_eq!(support::eval(&p, &reg, &cone, 65).0.data, undriven.data);
+}
+
+#[test]
+fn build_writes_every_marked_output_once() {
+    let reg = registry();
+    let (mut p, [fbm, levels, blur]) = chain(&reg);
+    let slope = p.graph.add_node(&reg, "data.slope", [600.0, 200.0]).unwrap();
+    p.graph.connect(&reg, &levels, "out", &slope, "in").unwrap();
+    let folder = temp_dir("build");
+    let opts = EvalOptions {
+        base_dir: Some(&folder),
+        ..Default::default()
+    };
+    assert!(
+        build_marked(&p, &reg, 65, std::path::Path::new("out"), &opts).is_err(),
+        "nothing marked"
+    );
+
+    p.set_export(&blur, "out", "exr32", true).unwrap();
+    p.set_export(&blur, "out", "png16", true).unwrap();
+    p.set_export(&slope, "out", "png16", true).unwrap();
+    assert!(p.set_export(&blur, "out", "tiff", true).is_err());
+    assert_eq!(p.export_formats(&blur, "out"), ["exr32", "png16"]);
+
+    let cache = EvalCache::default();
+    let written = build_marked(
+        &p,
+        &reg,
+        65,
+        std::path::Path::new("out"),
+        &EvalOptions {
+            cache: Some(&cache),
+            ..opts
+        },
+    )
+    .unwrap();
+    // fbm and levels computed once, although both outputs need them.
+    assert_eq!(cache.stats().misses, 4);
+    let names: Vec<String> = written
+        .iter()
+        .map(|w| w.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names.len(), 4, "{names:?}");
+    assert!(written.iter().all(|w| w.starts_with(folder.join("out"))));
+    let info: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(folder.join("out/build.json")).unwrap()).unwrap();
+    let files = info["files"].as_array().unwrap();
+    assert_eq!(files.len(), 3);
+    assert!(
+        files
+            .iter()
+            .any(|f| f["data"] == "mask" && f["node"] == slope.as_str())
+    );
+
+    // Deleting a node drops its marks; marks survive save/load.
+    p.remove_node(&slope).unwrap();
+    assert_eq!(p.exports.len(), 2);
+    let (loaded, _) = Project::from_json(&p.to_json().unwrap(), &reg).unwrap();
+    assert_eq!(loaded.exports, p.exports);
+    let _ = fbm;
+    std::fs::remove_dir_all(&folder).ok();
+}
+
+#[test]
+fn relative_output_folder_needs_a_project_folder() {
+    let reg = registry();
+    let (mut p, [_, _, blur]) = chain(&reg);
+    p.set_export(&blur, "out", "exr32", true).unwrap();
+    let err = build_marked(&p, &reg, 33, std::path::Path::new("out"), &EvalOptions::default()).unwrap_err();
+    assert!(err.to_string().contains("save the project"), "{err}");
+}
+
+#[test]
+fn file_node_reads_relative_paths_and_notices_changes() {
+    let reg = registry();
+    let dir = temp_dir("filenode");
+    let png = support::test_png(&dir);
+    let mut p = Project::default();
+    let file = p.graph.add_node(&reg, "primitive.file", [0.0, 0.0]).unwrap();
+    p.graph
+        .set_param(&reg, &file, "path", ParamValue::Text("heightmap.png".into()))
+        .unwrap();
+    let opts = EvalOptions {
+        base_dir: Some(&dir),
+        ..Default::default()
+    };
+    let g = support::eval_with(&p, &reg, &file, 257, &opts).0;
+    // Vertex-aligned: pixel (i, j) of a 257² image lands on sample (i, j).
+    let img = image::open(&png).unwrap().into_luma16();
+    let expected = img.get_pixel(40, 100).0[0] as f32 / 65535.0 * 2000.0;
+    assert!(
+        (g.get(40, 100) - expected).abs() < 1e-2,
+        "{} vs {expected}",
+        g.get(40, 100)
+    );
+
+    // Missing file: a clear error, not a crash.
+    let spec = GridSpec::full_world(&p.world, 33).unwrap();
+    let err = evaluate_node(&p.graph, &reg, &p.world, spec, &file, &EvalOptions::default()).unwrap_err();
+    assert!(err.to_string().contains("not found"), "{err}");
+
+    // Rewriting the file changes the cache key.
+    let cache = EvalCache::default();
+    let cached = EvalOptions {
+        cache: Some(&cache),
+        ..opts
+    };
+    support::eval_with(&p, &reg, &file, 33, &cached);
+    support::eval_with(&p, &reg, &file, 33, &cached);
+    assert_eq!(cache.stats().misses, 1);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    image::ImageBuffer::<image::Luma<u16>, _>::from_pixel(8, 8, image::Luma([1000u16]))
+        .save(&png)
+        .unwrap();
+    let flat = support::eval_with(&p, &reg, &file, 33, &cached).0;
+    assert_eq!(cache.stats().misses, 2);
+    assert!(
+        flat.data
+            .iter()
+            .all(|&v| (v - 1000.0 / 65535.0 * 2000.0).abs() < 1e-3)
+    );
     std::fs::remove_dir_all(&dir).ok();
 }

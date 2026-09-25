@@ -1,7 +1,7 @@
 //! The `.otstudio` project file: human-readable JSON, versioned from day one,
 //! with no computed data inside it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -18,8 +18,9 @@ pub const FORMAT_VERSION: u32 = 1;
 /// File extension for projects (without the dot).
 pub const EXTENSION: &str = "otstudio";
 
-/// An output marked for export.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// An output marked for export in one format. An output exported in two
+/// formats has two entries.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ExportSpec {
     pub node: String,
     pub port: String,
@@ -51,6 +52,45 @@ pub struct Project {
     pub build: BuildSettings,
     /// Editor state (viewed node, camera, ...). Opaque to the engine.
     pub ui: serde_json::Value,
+}
+
+impl Project {
+    /// Remove a node, its links and its export marks.
+    pub fn remove_node(&mut self, id: &str) -> Result<()> {
+        self.graph.remove_node(id)?;
+        self.exports.retain(|e| e.node != id);
+        Ok(())
+    }
+
+    /// Mark or unmark `node.port` for export in `format` (e.g. "exr32").
+    pub fn set_export(&mut self, node: &str, port: &str, format: &str, on: bool) -> Result<()> {
+        if crate::export::ExportFormat::parse(format).is_none() {
+            return Err(CoreError::Project(format!("unknown export format '{format}'")));
+        }
+        if self.graph.node(node).is_none() {
+            return Err(CoreError::NodeNotFound(node.into()));
+        }
+        let spec = ExportSpec {
+            node: node.into(),
+            port: port.into(),
+            format: format.into(),
+        };
+        self.exports.retain(|e| e != &spec);
+        if on {
+            self.exports.push(spec);
+            self.exports.sort();
+        }
+        Ok(())
+    }
+
+    /// Formats `node.port` is marked for.
+    pub fn export_formats(&self, node: &str, port: &str) -> Vec<String> {
+        self.exports
+            .iter()
+            .filter(|e| e.node == node && e.port == port)
+            .map(|e| e.format.clone())
+            .collect()
+    }
 }
 
 impl Default for Project {
@@ -95,6 +135,9 @@ struct NodeFile {
     pos: [f32; 2],
     #[serde(default)]
     params: BTreeMap<String, ParamValue>,
+    /// Parameters shown as input ports.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    exposed: BTreeSet<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -120,6 +163,7 @@ impl Project {
                     type_version: n.type_version,
                     pos: n.pos,
                     params: n.params.clone(),
+                    exposed: n.exposed.clone(),
                 })
                 .collect(),
             links: self
@@ -162,6 +206,7 @@ impl Project {
                 type_version: n.type_version,
                 pos: n.pos,
                 params: n.params,
+                exposed: n.exposed,
             };
             match registry.get(&node.type_id) {
                 None => warnings.push(format!(
@@ -196,6 +241,8 @@ impl Project {
                         }
                         None => false,
                     });
+                    node.exposed
+                        .retain(|k| schema.param(k).is_some_and(|d| d.drivable));
                 }
             }
             graph.insert_raw(node);
@@ -229,11 +276,22 @@ impl Project {
             }
         }
 
+        let mut exports = file.exports;
+        exports.retain(|e| {
+            let keep = graph.node(&e.node).is_some();
+            if !keep {
+                warnings.push(format!("dropped export of missing node {}", e.node));
+            }
+            keep
+        });
+        exports.sort();
+        exports.dedup();
+
         Ok((
             Project {
                 world: file.world,
                 graph,
-                exports: file.exports,
+                exports,
                 build: file.build,
                 ui: if file.ui.is_null() {
                     serde_json::json!({})

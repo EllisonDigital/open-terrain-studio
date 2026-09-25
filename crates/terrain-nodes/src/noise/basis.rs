@@ -112,21 +112,175 @@ pub fn simplex(x: f64, y: f64, seed: u64) -> f64 {
     (n * SIMPLEX_SCALE).clamp(-1.0, 1.0)
 }
 
+/// A uniform value in 0..1 from a hash (53 bits, exact in f64).
+#[inline]
+fn unit(h: u64) -> f64 {
+    (h >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
+}
+
+/// 2D value noise at `(x, y)` (lattice units): random heights at lattice
+/// points, smoothly interpolated. Range -1..1. Blobbier than Perlin.
+pub fn value(x: f64, y: f64, seed: u64) -> f64 {
+    let x0 = x.floor();
+    let y0 = y.floor();
+    let (ix, iy) = (x0 as i64, y0 as i64);
+    let v = |gx: i64, gy: i64| unit(hash2(gx, gy, seed)) * 2.0 - 1.0;
+    let u = fade(x - x0);
+    let w = fade(y - y0);
+    lerp(
+        lerp(v(ix, iy), v(ix + 1, iy), u),
+        lerp(v(ix, iy + 1), v(ix + 1, iy + 1), u),
+        w,
+    )
+}
+
+/// Result of a cellular (Worley) noise lookup.
+#[derive(Clone, Copy, Debug)]
+pub struct Cells {
+    /// Distance to the nearest feature point (lattice units).
+    pub f1: f64,
+    /// Distance to the second nearest.
+    pub f2: f64,
+    /// A random value 0..1 identifying the nearest point's cell.
+    pub cell_value: f64,
+}
+
+/// Cellular noise (Worley 1996): one feature point per lattice cell, moved
+/// randomly within it by up to `jitter` (0 = a regular grid, 1 = anywhere in
+/// the cell). Searches the 5 × 5 neighbourhood, so F1 and F2 are exact.
+pub fn cellular(x: f64, y: f64, seed: u64, jitter: f64) -> Cells {
+    let ix = x.floor() as i64;
+    let iy = y.floor() as i64;
+    let mut d1 = f64::MAX;
+    let mut d2 = f64::MAX;
+    let mut id = 0u64;
+    for dy in -2..=2 {
+        for dx in -2..=2 {
+            let (cx, cy) = (ix + dx, iy + dy);
+            let h = hash2(cx, cy, seed);
+            let px = cx as f64 + 0.5 + jitter * (unit(h) - 0.5);
+            let py = cy as f64 + 0.5 + jitter * (unit(mix64(h)) - 0.5);
+            let d = (px - x) * (px - x) + (py - y) * (py - y);
+            if d < d1 {
+                d2 = d1;
+                d1 = d;
+                id = h;
+            } else if d < d2 {
+                d2 = d;
+            }
+        }
+    }
+    Cells {
+        f1: d1.sqrt(),
+        f2: d2.sqrt(),
+        cell_value: unit(mix64(id ^ 0x5bd1_e995)),
+    }
+}
+
 /// Which basis function a fractal uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Basis {
     Perlin,
     Simplex,
+    Value,
 }
 
 impl Basis {
+    /// From a "basis" choice parameter value.
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "simplex" => Basis::Simplex,
+            "value" => Basis::Value,
+            _ => Basis::Perlin,
+        }
+    }
+
     #[inline]
     pub fn sample(self, x: f64, y: f64, seed: u64) -> f64 {
         match self {
             Basis::Perlin => perlin(x, y, seed),
             Basis::Simplex => simplex(x, y, seed),
+            Basis::Value => value(x, y, seed),
         }
     }
+}
+
+/// Move to the next octave: rotate by atan(3/4), scale, and offset so the
+/// origin stays off the lattice.
+#[inline]
+fn next_octave(px: f64, py: f64, lacunarity: f64) -> (f64, f64) {
+    let rx = 0.8 * px - 0.6 * py;
+    let ry = 0.6 * px + 0.8 * py;
+    (rx * lacunarity + 17.31, ry * lacunarity + 43.17)
+}
+
+/// Ridged multifractal (after Musgrave 1994): inverted, squared noise layers,
+/// each weighted by the one before, so fine detail gathers on the crests.
+/// Returns about 0..1 (sharp ridges near 1).
+pub fn ridged(basis: Basis, x: f64, y: f64, seed: u64, octaves: u32, lacunarity: f64, gain: f64) -> f64 {
+    let mut sum = 0.0;
+    let mut norm = 0.0;
+    let mut amp = 1.0;
+    let mut weight = 1.0;
+    let (mut px, mut py) = (x, y);
+    for o in 0..octaves {
+        let s = terrain_core::seed::derive(seed, o as u64);
+        let n = 1.0 - basis.sample(px, py, s).abs();
+        let signal = n * n * weight;
+        weight = (signal * 2.0).clamp(0.0, 1.0);
+        sum += amp * signal;
+        norm += amp;
+        amp *= gain;
+        (px, py) = next_octave(px, py, lacunarity);
+    }
+    if norm > 0.0 { sum / norm } else { 0.0 }
+}
+
+/// Billow noise: layers of `|noise|`, giving rounded, puffy hills with
+/// creased valleys. Returns about -1..1.
+pub fn billow(basis: Basis, x: f64, y: f64, seed: u64, octaves: u32, lacunarity: f64, gain: f64) -> f64 {
+    let mut sum = 0.0;
+    let mut norm = 0.0;
+    let mut amp = 1.0;
+    let (mut px, mut py) = (x, y);
+    for o in 0..octaves {
+        let s = terrain_core::seed::derive(seed, o as u64);
+        sum += amp * (basis.sample(px, py, s).abs() * 2.0 - 1.0);
+        norm += amp;
+        amp *= gain;
+        (px, py) = next_octave(px, py, lacunarity);
+    }
+    if norm > 0.0 { sum / norm } else { 0.0 }
+}
+
+/// Domain-warped fBm (after Quilez, "Domain warping"): fBm sampled at a
+/// position pushed around by two other fBm fields. `warp` is in lattice units.
+#[allow(clippy::too_many_arguments)]
+pub fn warped_fbm(
+    basis: Basis,
+    x: f64,
+    y: f64,
+    seed: u64,
+    octaves: u32,
+    lacunarity: f64,
+    gain: f64,
+    warp: f64,
+) -> f64 {
+    let (sa, sb) = (
+        terrain_core::seed::derive(seed, 1001),
+        terrain_core::seed::derive(seed, 1002),
+    );
+    let qx = fbm(basis, x, y, sa, octaves.min(4), lacunarity, gain);
+    let qy = fbm(basis, x + 5.2, y + 1.3, sb, octaves.min(4), lacunarity, gain);
+    fbm(
+        basis,
+        x + warp * qx,
+        y + warp * qy,
+        seed,
+        octaves,
+        lacunarity,
+        gain,
+    )
 }
 
 /// Fractal Brownian motion: `octaves` layers of noise, each `lacunarity` times
@@ -142,11 +296,7 @@ pub fn fbm(basis: Basis, x: f64, y: f64, seed: u64, octaves: u32, lacunarity: f6
         sum += amp * basis.sample(px, py, s);
         norm += amp;
         amp *= gain;
-        // Rotate by atan(3/4) and scale; the offset keeps the origin off-lattice.
-        let rx = 0.8 * px - 0.6 * py;
-        let ry = 0.6 * px + 0.8 * py;
-        px = rx * lacunarity + 17.31;
-        py = ry * lacunarity + 43.17;
+        (px, py) = next_octave(px, py, lacunarity);
     }
     if norm > 0.0 { sum / norm } else { 0.0 }
 }
@@ -190,8 +340,24 @@ mod tests {
     }
 
     #[test]
+    fn value_and_cellular_are_bounded() {
+        let (lo, hi) = range_of(|x, y| value(x, y, 7));
+        assert!(lo >= -1.0 && hi <= 1.0 && lo < -0.6 && hi > 0.6, "{lo} {hi}");
+        for jitter in [0.0, 0.5, 1.0] {
+            let (lo, hi) = range_of(|x, y| cellular(x, y, 3, jitter).f1);
+            assert!(lo >= 0.0 && hi < 1.5, "jitter {jitter}: {lo} {hi}");
+        }
+        let c = cellular(0.3, 0.7, 1, 1.0);
+        assert!(c.f2 >= c.f1 && (0.0..1.0).contains(&c.cell_value));
+        let (lo, hi) = range_of(|x, y| ridged(Basis::Perlin, x, y, 9, 6, 2.0, 0.5));
+        assert!(lo >= 0.0 && hi <= 1.0, "ridged {lo} {hi}");
+        let (lo, hi) = range_of(|x, y| billow(Basis::Perlin, x, y, 9, 6, 2.0, 0.5));
+        assert!(lo >= -1.0 && hi <= 1.0, "billow {lo} {hi}");
+    }
+
+    #[test]
     fn noise_is_continuous() {
-        for basis in [Basis::Perlin, Basis::Simplex] {
+        for basis in [Basis::Perlin, Basis::Simplex, Basis::Value] {
             let a = basis.sample(10.0, 10.0, 3);
             let b = basis.sample(10.0 + 1e-6, 10.0, 3);
             assert!((a - b).abs() < 1e-4, "{basis:?} jumps");
