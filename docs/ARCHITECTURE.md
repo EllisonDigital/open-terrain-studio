@@ -130,6 +130,8 @@ Each grid carries its resolution, its world extent and a cell size in metres (`w
 2. Simulations run for a physical duration or rain amount, and step counts are derived from cell size.
 3. Randomness is seeded from world coordinates, not pixel indices, so a feature sits in the same place at 512² and 8,192².
 4. A regression test renders every node at 512² and 2,048², downsamples the larger one, and checks they match within tolerance.
+   > **Changed 25 Sep 2026 (v0.2):** the test uses **513² and 2,049²** instead of 512² and 2,048². Every fourth high-resolution sample then lands exactly on a low-resolution one, so samples are compared directly with no downsampling. Tolerances are per node: pure functions of position must match exactly; nodes that use neighbouring samples (blur, slope, curvature, distance) get a small allowance.
+5. **Added 25 Sep 2026 (v0.2):** directions are degrees, with 0° along +X and 90° along +Y (clockwise in the 2D view and in exported images).
 
 **Resolution presets:** preview at 512 or 1,024; build at 1,024 to 8,192 (plus Unreal-friendly sizes 1,009 / 2,017 / 4,033 / 8,129).
 
@@ -160,6 +162,8 @@ pub trait NodeKind: Send + Sync {
 
 **Parameter inputs.** Most scalar parameters can optionally become an input port, so a mask can drive e.g. erosion strength spatially, as in Gaea.
 
+> **Added 25 Sep 2026 (v0.2):** how a parameter port works. The port takes a Mask, and the value used at each cell is the parameter's value × the mask, clamped to the parameter's range (black = 0, white = the value set). A node marks the parameters it can vary per cell as *drivable* and reads them with `EvalContext::field`. The project file lists each node's exposed parameters under `exposed`, and their ports are keyed `p:<parameter>`.
+
 **Evaluation.**
 
 1. The user views a node (or a build is requested).
@@ -168,6 +172,8 @@ pub trait NodeKind: Send + Sync {
 4. Results are stored in the cache and the viewed output is returned.
 
 **Caching.** Cache key = hash(node type, parameters, seed, resolution, tile, input keys). A change to one node invalidates only that node and its descendants. Preview and build resolutions are cached separately.
+
+> **Added 25 Sep 2026 (v0.2):** the key also includes the node's type version and the world settings. Nodes that read outside the graph add to it (the File node adds the imported file's size and modification time). The cache is an in-memory LRU, 1 GiB by default, shared by preview, export and build jobs. Spilling to disk (section 4, *Memory budget*) is not built yet.
 
 **Determinism.** Each node gets a seed derived from the project seed and the node's stable id. No node may use wall-clock time, thread order or unordered hash-map iteration in its results. Parallel reductions must be order-independent.
 
@@ -344,7 +350,7 @@ open-terrain-studio/
 ├── app/                    # Godot project (UI, scenes, GDScript)
 ├── presets/                # species + graph presets
 ├── import-helpers/         # Unreal / Godot / Blender scripts (v0.9)
-├── tests/golden/           # reference outputs for regression tests (Git LFS)
+├── tests/golden/           # reference outputs for regression tests (Git LFS; since v0.2: node output hashes, see Testing)
 ├── docs/                   # ARCHITECTURE.md, ROADMAP.md
 ├── LICENSE-MIT
 ├── LICENSE-APACHE
@@ -356,8 +362,10 @@ open-terrain-studio/
 
 - **Unit tests** per node in Rust: known inputs → expected statistics (min/max/mean) and edge behaviour.
 - **Golden tests:** fixed graphs rendered at 512², compared to stored reference EXRs with a tolerance.
+  > **Changed 25 Sep 2026 (v0.2):** instead of stored EXRs (and Git LFS), every node's default output at 65² is hashed and compared with `tests/golden/node_hashes.json`. Since results must be bit-identical on every machine, an exact hash catches any change, and a deliberate change is recorded by regenerating the file with `OTS_BLESS=1`.
 - **Determinism tests:** each node evaluated twice, with 1 thread and with many threads → identical bytes.
 - **Resolution tests:** 512² vs downsampled 2,048² must match within tolerance (section 4).
+  > **Changed 25 Sep 2026 (v0.2):** 513² vs every fourth sample of 2,049² (see section 4).
 - **GPU vs CPU tests:** run where a GPU is available (locally and on a GPU CI runner later).
 - **Benchmarks** (`criterion`) for hot nodes, tracked per release.
 

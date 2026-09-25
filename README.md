@@ -6,9 +6,9 @@ Build a landscape in a node graph, shape it with noise, erosion and water simula
 
 OpenTerrainStudio is built with a Rust terrain engine and a Godot 4 editor, and is developed by **EllisonDigital**.
 
-> **Status: pre-alpha (v0.1).** The foundation works end to end: node graph, live 3D preview, save/load and EXR/PNG export, packaged for Windows, macOS and Linux. See the [roadmap](docs/ROADMAP.md) for what's next.
+> **Status: pre-alpha (v0.2).** Build real landforms by hand: 36 nodes (primitives, noise, mountains, ridges, canyons, craters, plateaus, dunes, filters and masks), masks that drive parameters, undo/redo, a result cache so only edited branches recompute, a 2D map view and one-click builds of every marked output. Erosion is next; see the [roadmap](docs/ROADMAP.md).
 
-![OpenTerrainStudio v0.1: node graph, 3D preview and inspector](docs/images/editor-v0.1.png)
+![OpenTerrainStudio v0.2: the alpine range example in the node graph and 3D preview](docs/images/editor-v0.2.png)
 
 ---
 
@@ -78,15 +78,37 @@ systems, install the templates from the Godot editor (*Editor → Manage Export 
 Pushing a `v*` tag makes CI build the library on all three OSes, export the apps and publish a GitLab
 Release; see [`.gitlab-ci.yml`](.gitlab-ci.yml).
 
-### Using the app (v0.1)
+### Using the app (v0.2)
 
+- **File → Open Example** opens one of three reference landforms (alpine range, canyon, dune field) made only
+  from built-in nodes. They are a good way to see how nodes combine.
 - **Right-click the graph** (or press *Add node*) to add nodes. Drag from an output to an input to connect.
-- **Click a node** to preview it in 3D and edit its settings on the right. Click empty space for world settings.
+- **Click a node** to preview it and edit its settings on the right. Click empty space for world settings.
 - **Viewport:** drag to orbit, Shift-drag or middle-drag to pan, scroll to zoom, <kbd>F</kbd> to frame.
-- **File → Export Viewed Node** writes a 32-bit EXR (heights in metres) and/or a 16-bit PNG (0–65535 = the
-  world height range), plus a `build.json` with the world size, height range and Unreal import values.
+  <kbd>Tab</kbd> switches to the **2D map**, which shows the position and value under the mouse.
+- **Masks** (Slope, Height Mask, Curvature…) are shown as a colour overlay on the terrain they came from.
+- **Mask ports:** settings with a *Mask port* button can be driven by a mask. Click it and connect a mask to
+  the new green input: black scales the value to 0, white keeps the value you set.
+- **Undo/redo:** <kbd>Ctrl</kbd>+<kbd>Z</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> (or
+  <kbd>Ctrl</kbd>+<kbd>Y</kbd>), for every graph, setting and world change.
+- **Export:** tick EXR and/or PNG under *Export* in a node's settings (or press
+  <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>E</kbd> for the viewed node). The **Build** tab lists every marked output;
+  *Build* (<kbd>Ctrl</kbd>+<kbd>B</kbd>) writes them all at the build resolution with one `build.json`.
+  *File → Export Viewed Node* still exports a single node.
 
-v0.1 nodes: Constant, Perlin, Simplex, fBm, Combine, Levels.
+Results are cached: after an edit only that node and the nodes after it are recomputed, and the status bar
+says how many ("1 node computed, 7 ms").
+
+**Nodes in v0.2**
+
+| Category | Nodes |
+| --- | --- |
+| Primitives | Constant, Gradient, Cone, Hemisphere, Shape, File (import an EXR or PNG heightmap) |
+| Noise | Perlin, Simplex, Value, fBm, Ridged, Billow, Domain Warp, Voronoi |
+| Terrain | Mountain, Ridge, Canyon, Crater, Plateau, Dunes |
+| Adjust | Levels, Curve, Clamp, Invert, Terrace, Blur, Sharpen, Transform, Warp |
+| Combine | Combine (add, subtract, multiply, max, min, blend; optional mask) |
+| Data (masks) | Height Mask, Slope, Curvature, Aspect, Select Range, Distance |
 
 ### Tests
 
@@ -95,6 +117,10 @@ cargo test --workspace
 godot --headless --path app --script res://tests/smoke_test.gd
 godot --path app --script res://tests/ui_test.gd        # needs a display (or xvfb-run) and a GPU
 ```
+
+`cargo test` checks every node for determinism across thread counts, resolution independence (513² against
+2,049²) and unchanged output (`tests/golden/node_hashes.json`). To look at a node without the app, render it
+to a shaded PNG: `cargo run --release -p terrain-nodes --example render -- terrain.mountain mountain.png`.
 
 ## Contributing
 
