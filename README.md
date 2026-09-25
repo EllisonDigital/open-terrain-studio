@@ -38,6 +38,7 @@ To use exported heightmaps in Blender, Unreal Engine or Godot, see the [export g
 
 ## Documentation
 
+- [Water and hydrology](docs/water.md): flow, rivers, lakes, sea, snow and wetness.
 - [Export guides](docs/export-guides.md): importing heightmaps into Blender, Unreal Engine and Godot at the right scale.
 - [Architecture](docs/ARCHITECTURE.md): how the application and terrain engine are designed.
 - [Roadmap](docs/ROADMAP.md): milestones from v0.1 to v1.0, risks and decisions.
@@ -108,8 +109,8 @@ says how many ("1 node computed, 7 ms").
 | Terrain | Mountain, Ridge, Canyon, Crater, Plateau, Dunes |
 | Adjust | Levels, Curve, Clamp, Invert, Terrace, Blur, Sharpen, Transform, Warp |
 | Combine | Combine (add, subtract, multiply, max, min, blend; optional mask) |
-| Data (masks) | Height Mask, Slope, Curvature, Aspect, Select Range, Distance, Rock Hardness (v0.3, in progress) |
-| Simulate | Hydraulic Erosion (rivers over geological time), Thermal Erosion (v0.3, not yet released: see the roadmap) |
+| Data (masks) | Height Mask, Slope, Curvature, Aspect, Select Range, Distance, Rock Hardness, Flow, Wetness |
+| Simulate | Hydraulic Erosion (rivers over geological time), Thermal Erosion, Rivers, Lakes, Sea, Snow (v0.5, see [water](docs/water.md)) |
 
 ### Tests
 

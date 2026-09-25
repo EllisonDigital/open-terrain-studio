@@ -103,6 +103,8 @@ limited headroom on other hardware.
 - **Hydraulic Erosion stays on the CPU.** Its Priority-Flood routing and subsequent passes along the
   drainage tree are sequential. The existing solver was optimized without changing outputs; a GPU
   solver would need different, parallel routing and would carve rivers in slightly different places.
+- **The water nodes (v0.5) stay on the CPU** for the same reason: Flow, Rivers, Lakes and Wetness drain
+  along the same routing, and Sea's flood fill is sequential. Snow is cheap; see [water.md](water.md).
 - **Fractal noise precision.** Kernels compute lattice positions in f32. Each octave multiplies them
   by the lacunarity, so beyond about 8 octaves the finest octaves lose precision: a 12-octave Ridged
   differs by up to 160 ppm in 0.02% of samples. These nodes may exceed 100 ppm in up to 0.1% of

@@ -16,3 +16,7 @@ Keep this project loadable and buildable with built-in nodes. When adding a majo
 the app, consider extending this world so the example grows with the product; preserve the recognizable
 basin and existing export products unless a feature specifically supersedes them. The test suite loads
 and builds every `.otstudio` in this directory.
+
+**River coast** is the v0.5 water example: a mountain island, eroded, with a crater on its flank, then
+Rivers, Lakes, Sea and Snow. Rivers run to the sea at the world's edges, the crater holds a lake, and the
+River, Lakes, Sea, Shoreline and Snow masks are marked for export. See [water.md](../../docs/water.md).

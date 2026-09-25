@@ -232,6 +232,8 @@ The 3D viewport renders the terrain from GPU textures with a shader-displaced LO
 - **View modes.** Shaded terrain, colour map, and "mask overlay" (any mask output shown as a false-colour tint over the terrain, like Gaea's data view). A 2D view shows the raw map with pixel values on hover.
 - **Lighting.** Directional sun with shadows, sky and ambient light from Godot's environment; sun angle adjustable in the viewport toolbar.
 - **Water preview.** Simple flat water plane at sea level, plus river/lake surfaces from hydrology outputs (v0.5+).
+
+> **Added 25 Sep 2026 (v0.5):** Rivers, Lakes and Sea each output a *Water surface* Heightfield next to their *Height*. When the viewed output is a heightfield, the builder takes, per pixel, the highest water surface of those nodes upstream where it's above their own height, and the viewport draws it as a second displaced, translucent grid. Masks are shown without water. Details in [water.md](water.md).
 - **Vegetation preview.** Trees/Shrubs points drawn with MultiMesh using simple placeholder meshes (cone/sphere/billboard per species), with a density cap for performance. Final vegetation belongs in the target engine.
 - **Camera.** Orbit, fly and top-down modes; frame-selected; scale reference (a 2 m human-height marker) toggle.
 - **Preview vs build.** The viewport always shows the preview resolution. A "Build" command produces full-resolution results for export.
