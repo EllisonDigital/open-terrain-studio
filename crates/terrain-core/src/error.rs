@@ -35,6 +35,11 @@ pub enum CoreError {
     Json(#[from] serde_json::Error),
     #[error("image error: {0}")]
     Image(String),
+    #[error("GPU error: {0}")]
+    Gpu(String),
+    /// The node has no GPU kernel for these settings; the evaluator uses the CPU.
+    #[error("no GPU kernel for this node")]
+    GpuUnsupported,
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

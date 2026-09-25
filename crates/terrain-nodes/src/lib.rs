@@ -15,6 +15,8 @@ pub mod basic;
 pub mod common;
 pub mod data;
 pub mod erosion;
+pub mod gpu_check;
+pub mod kernels;
 pub mod noise;
 pub mod primitives;
 pub mod terrain;

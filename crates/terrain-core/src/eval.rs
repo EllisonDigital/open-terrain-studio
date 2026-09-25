@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::cache::{CacheKey, EvalCache, key_of};
 use crate::error::{CoreError, Result};
+use crate::gpu::Gpu;
 use crate::graph::{Graph, NodeInstance};
 use crate::grid::GridSpec;
 use crate::node::{EvalContext, NodeKind, NodeRegistry, Outputs};
@@ -23,6 +24,10 @@ pub struct EvalOptions<'a> {
     /// Folder that relative file paths (e.g. imported heightmaps) are resolved
     /// against: the project file's folder.
     pub base_dir: Option<&'a Path>,
+    /// Run nodes that have a GPU kernel on this device. Their results match
+    /// the CPU within tolerance rather than bit for bit, so they are cached
+    /// separately. `None` = everything on the CPU (bit-exact).
+    pub gpu: Option<&'a Gpu>,
 }
 
 /// Evaluate `target` (and everything upstream of it) over `spec`.
@@ -84,6 +89,7 @@ pub fn evaluate_node(
             }
         }
 
+        let gpu = opts.gpu.filter(|_| schema.gpu);
         let key = cache_key(
             kind.as_ref(),
             node,
@@ -92,6 +98,7 @@ pub fn evaluate_node(
             world,
             &input_keys,
             opts.base_dir,
+            gpu.is_some(),
         );
         keys.insert(id.clone(), key);
 
@@ -108,7 +115,27 @@ pub fn evaluate_node(
                 ctx.cancel = opts.cancel;
                 ctx.progress = Some(&node_progress);
                 ctx.base_dir = opts.base_dir;
-                let outputs = kind.evaluate(&ctx).map_err(|e| match e {
+                let on_gpu = match gpu {
+                    Some(gpu) => match kind.evaluate_gpu(&ctx, gpu) {
+                        Ok(outputs) => {
+                            gpu.record_node();
+                            Some(outputs)
+                        }
+                        Err(CoreError::Cancelled) => return Err(CoreError::Cancelled),
+                        Err(CoreError::GpuUnsupported) => None,
+                        // Anything else (a driver or kernel problem): use the CPU.
+                        Err(e) => {
+                            gpu.record_fallback(&e);
+                            None
+                        }
+                    },
+                    None => None,
+                };
+                let outputs = match on_gpu {
+                    Some(outputs) => Ok(outputs),
+                    None => kind.evaluate(&ctx),
+                };
+                let outputs = outputs.map_err(|e| match e {
                     CoreError::Cancelled | CoreError::MissingInput { .. } => e,
                     other => CoreError::NodeFailed {
                         node: id.clone(),
@@ -138,6 +165,7 @@ pub fn evaluate_node(
 }
 
 /// The cache key of one node result: a hash of everything it depends on.
+#[allow(clippy::too_many_arguments)]
 fn cache_key(
     kind: &dyn NodeKind,
     node: &NodeInstance,
@@ -146,6 +174,7 @@ fn cache_key(
     world: &World,
     inputs: &[(&str, CacheKey, &str)],
     base_dir: Option<&Path>,
+    gpu: bool,
 ) -> CacheKey {
     let schema = kind.schema();
     let mut text = String::with_capacity(512);
@@ -174,6 +203,9 @@ fn cache_key(
     let salt = kind.cache_salt(&node.params, base_dir);
     if !salt.is_empty() {
         let _ = write!(text, "|salt={salt}");
+    }
+    if gpu {
+        text.push_str("|gpu");
     }
     key_of(&text)
 }

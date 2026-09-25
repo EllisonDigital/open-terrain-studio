@@ -17,7 +17,8 @@ terrain-nodes = { path = "crates/terrain-nodes" }
 
 # Godot bindings: pinned exactly (pre-1.0, breaking changes between minors).
 # api-4-6 = the extension loads in Godot 4.6 and every later 4.x release.
-godot = { version = "=0.5.5", default-features = false, features = ["api-4-6", "__codegen-full"] }
+# experimental-threads: the GPU thread calls Godot's RenderingDevice (terrain-godot/src/gpu.rs).
+godot = { version = "=0.5.5", default-features = false, features = ["api-4-6", "__codegen-full", "experimental-threads"] }
 
 rayon = "1.10"
 serde = { version = "1", features = ["derive"] }

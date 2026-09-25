@@ -5,7 +5,7 @@ mod support;
 
 use terrain_core::export::{ExportFormat, ExportRequest, build_marked, export_node};
 use terrain_core::{
-    CoreError, EvalCache, EvalOptions, GridSpec, NodeRegistry, ParamValue, Project, Value, evaluate_node,
+    CoreError, EvalCache, EvalOptions, GridSpec, NodeRegistry, ParamValue, Project, evaluate_node,
 };
 
 use support::{registry, temp_dir};
@@ -25,9 +25,7 @@ fn sample_project(reg: &NodeRegistry) -> (Project, String, String) {
 fn eval(p: &Project, reg: &NodeRegistry, node: &str, res: u32) -> std::sync::Arc<terrain_core::Grid> {
     let spec = GridSpec::full_world(&p.world, res).unwrap();
     let out = evaluate_node(&p.graph, reg, &p.world, spec, node, &EvalOptions::default()).unwrap();
-    match out.get("out").unwrap() {
-        Value::Heightfield(g) | Value::Mask(g) => g.clone(),
-    }
+    out["out"].grid().clone()
 }
 
 #[test]

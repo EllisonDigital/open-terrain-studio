@@ -1,12 +1,17 @@
 //! Adjust nodes: Curve, Clamp, Invert, Terrace, Blur, Sharpen, Transform and
 //! Warp. (Levels lives in `basic.rs`.)
 
+use std::sync::Arc;
+
 use terrain_core::error::Result;
 use terrain_core::ops::gaussian_blur;
 use terrain_core::seed::derive;
-use terrain_core::{EvalContext, Grid, NodeKind, NodeSchema, Outputs, ParamDef, PortDef, PortType};
+use terrain_core::{
+    EvalContext, Gpu, GpuBuffer, Grid, NodeKind, NodeSchema, Outputs, ParamDef, Params, PortDef, PortType,
+};
 
-use crate::common::{direction, heightfield_out, lerp, seed_param, strength_param};
+use crate::common::{direction, grid_positions, heightfield_out, lerp, seed_param, strength_param};
+use crate::kernels;
 use crate::noise::basis::{self, Basis};
 
 fn adjust_schema(type_id: &str, label: &str, description: &str, params: Vec<ParamDef>) -> NodeSchema {
@@ -21,6 +26,54 @@ fn adjust_schema(type_id: &str, label: &str, description: &str, params: Vec<Para
         params,
         gpu: false,
     }
+}
+
+/// Run `shaders/adjust.comp` in `mode` over `input` (and `aux`), with the
+/// drivable parameter `driver` (if any) in `f[0..3]`; `set` adds the rest.
+fn adjust_gpu(
+    ctx: &EvalContext,
+    gpu: &Gpu,
+    mode: u32,
+    input: &GpuBuffer,
+    aux: Option<&GpuBuffer>,
+    driver: Option<&str>,
+    set: impl FnOnce(Params) -> Params,
+) -> Result<Outputs> {
+    let s = ctx.spec;
+    let dummy = gpu.dummy()?;
+    let mut p = grid_positions(Params::grid(s).u(4, mode), s);
+    let mask = match driver {
+        Some(key) => {
+            let field = gpu.field(ctx, key)?;
+            p = p
+                .u(5, field.driven())
+                .f(0, field.value)
+                .f(1, field.min)
+                .f(2, field.max);
+            gpu.field_buffer(&field)?
+        }
+        None => dummy.clone(),
+    };
+    let out = gpu.alloc(s.len())?;
+    let aux = aux.unwrap_or(&dummy);
+    gpu.dispatch_grid(&kernels::ADJUST, &[input, aux, &mask, &out], &set(p), s)?;
+    Ok(Outputs::from([(
+        "out".to_string(),
+        gpu.value(PortType::Heightfield, s, out),
+    )]))
+}
+
+/// The input and its Gaussian blur with radius `radius_m` (σ = radius / 2), on the GPU.
+fn blurred_gpu(ctx: &EvalContext, gpu: &Gpu) -> Result<(Arc<GpuBuffer>, Arc<GpuBuffer>)> {
+    let input = gpu.input(ctx, "in")?;
+    let blurred = gpu.gaussian_blur(ctx.spec, &input, ctx.f64("radius_m") * 0.5)?;
+    Ok((input, blurred))
+}
+
+/// A schema with a GPU kernel.
+fn with_gpu(mut schema: NodeSchema) -> NodeSchema {
+    schema.gpu = true;
+    schema
 }
 
 /// Blend `input` towards `effect` by the (drivable) "strength" parameter.
@@ -214,7 +267,7 @@ pub struct Blur {
 impl Default for Blur {
     fn default() -> Self {
         Self {
-            schema: adjust_schema(
+            schema: with_gpu(adjust_schema(
                 "adjust.blur",
                 "Blur",
                 "Smooth the terrain. Features smaller than about the radius are smoothed away.",
@@ -223,7 +276,7 @@ impl Default for Blur {
                         .describe("Blur radius in metres (twice the Gaussian's standard deviation)."),
                     strength_param(),
                 ],
-            ),
+            )),
         }
     }
 }
@@ -237,6 +290,10 @@ impl NodeKind for Blur {
         let blurred = gaussian_blur(input, ctx.f64("radius_m") * 0.5);
         blend_by_strength(ctx, input, blurred)
     }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        let (input, blurred) = blurred_gpu(ctx, gpu)?;
+        adjust_gpu(ctx, gpu, 0, &input, Some(&blurred), Some("strength"), |p| p)
+    }
 }
 
 /// Unsharp mask.
@@ -247,7 +304,7 @@ pub struct Sharpen {
 impl Default for Sharpen {
     fn default() -> Self {
         Self {
-            schema: adjust_schema(
+            schema: with_gpu(adjust_schema(
                 "adjust.sharpen",
                 "Sharpen",
                 "Exaggerate detail: bumps smaller than the radius get taller and dips deeper.",
@@ -258,7 +315,7 @@ impl Default for Sharpen {
                         .describe("1 = double the detail.")
                         .drivable(),
                 ],
-            ),
+            )),
         }
     }
 }
@@ -273,6 +330,10 @@ impl NodeKind for Sharpen {
         let blurred = gaussian_blur(input, ctx.f64("radius_m") * 0.5);
         heightfield_out(input.map_indexed(|idx, h| h + amount.at(idx) * (h - blurred.data[idx])))
     }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        let (input, blurred) = blurred_gpu(ctx, gpu)?;
+        adjust_gpu(ctx, gpu, 1, &input, Some(&blurred), Some("amount"), |p| p)
+    }
 }
 
 // ---- Transform --------------------------------------------------------------
@@ -285,7 +346,7 @@ pub struct Transform {
 impl Default for Transform {
     fn default() -> Self {
         Self {
-            schema: adjust_schema(
+            schema: with_gpu(adjust_schema(
                 "adjust.transform",
                 "Transform",
                 "Move, rotate and scale the terrain around the centre of the world. \
@@ -301,7 +362,7 @@ impl Default for Transform {
                     ParamDef::float("height_scale", "Height scale", 1.0, -10.0, 10.0)
                         .describe("Multiply heights (around the world's lowest height)."),
                 ],
-            ),
+            )),
         }
     }
 }
@@ -326,6 +387,22 @@ impl NodeKind for Transform {
             h0 + (h - h0) * hs
         }))
     }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        let input = gpu.input(ctx, "in")?;
+        let c = ctx.world.centre();
+        let (cos, sin) = direction(-ctx.f64("rotation_deg"));
+        adjust_gpu(ctx, gpu, 2, &input, None, None, |p| {
+            p.f(3, c[0] as f32)
+                .f(4, c[1] as f32)
+                .f(5, ctx.f32("move_x_m"))
+                .f(6, ctx.f32("move_y_m"))
+                .f(7, cos as f32)
+                .f(8, sin as f32)
+                .f(9, ctx.f32("scale"))
+                .f(10, ctx.f32("height_scale"))
+                .f(11, ctx.world.height_range_m[0])
+        })
+    }
 }
 
 // ---- Warp -------------------------------------------------------------------
@@ -338,7 +415,7 @@ pub struct Warp {
 impl Default for Warp {
     fn default() -> Self {
         Self {
-            schema: adjust_schema(
+            schema: with_gpu(adjust_schema(
                 "adjust.warp",
                 "Warp",
                 "Push the terrain around with smooth noise, bending straight lines and regular shapes \
@@ -352,7 +429,7 @@ impl Default for Warp {
                     ParamDef::int("octaves", "Octaves", 4, 1, 10).describe("Detail in the swirls."),
                     seed_param(),
                 ],
-            ),
+            )),
         }
     }
 }
@@ -373,5 +450,14 @@ impl NodeKind for Warp {
             let dy = basis::fbm(Basis::Perlin, x / size, y / size, sb, octaves, 2.0, 0.5);
             input.sample_bilinear_m(x + dx * s, y + dy * s)
         }))
+    }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        let input = gpu.input(ctx, "in")?;
+        adjust_gpu(ctx, gpu, 3, &input, None, Some("strength_m"), |p| {
+            p.u(6, ctx.i64("octaves") as u32)
+                .u64(8, derive(ctx.seed, 1))
+                .u64(10, derive(ctx.seed, 2))
+                .f(3, ctx.f32("size_m"))
+        })
     }
 }

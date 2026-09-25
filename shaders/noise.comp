@@ -1,0 +1,60 @@
+// Every noise node (crates/terrain-nodes/src/noise/mod.rs): Perlin, Simplex,
+// Value, fBm, Ridged, Billow, Domain Warp and Voronoi.
+//
+// u[2..3] seed         u[4] node (0 Perlin, 1 Simplex, 2 Value, 3 fBm, 4 Ridged,
+// u[5] basis           u[6] octaves      5 Billow, 6 Domain warp, 7 Voronoi)
+// u[7] Voronoi mode (0 F1, 1 peaks, 2 edges, 3 cells)   u[8] height driven by mask
+// f[0], f[1] lattice x at column 0 and per column; f[2], f[3] the same for y
+// f[4] height  f[5] base  f[6] lacunarity  f[7] gain  f[8] warp  f[9] jitter
+// f[10], f[11] height range when driven
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0, std430) writeonly buffer Out { float result[]; };
+layout(set = 0, binding = 1, std430) readonly buffer HeightMask { float height_mask[]; };
+
+float node_noise(vec2 p, uvec2 seed) {
+    uint node = pc.u[4];
+    uint basis = pc.u[5];
+    uint octaves = pc.u[6];
+    float lacunarity = pc.f[6];
+    float gain = pc.f[7];
+    if (node == 0u) {
+        return perlin(p, seed);
+    } else if (node == 1u) {
+        return simplex(p, seed);
+    } else if (node == 2u) {
+        return value_noise(p, seed);
+    } else if (node == 3u) {
+        return fbm(basis, p, seed, octaves, lacunarity, gain);
+    } else if (node == 4u) {
+        return ridged(basis, p, seed, octaves, lacunarity, gain) * 2.0 - 1.0;
+    } else if (node == 5u) {
+        return billow(basis, p, seed, octaves, lacunarity, gain);
+    } else if (node == 6u) {
+        return warped_fbm(basis, p, seed, octaves, lacunarity, gain, pc.f[8]);
+    }
+    vec3 c = cellular(p, seed, pc.f[9]);
+    uint mode = pc.u[7];
+    if (mode == 1u) {
+        return 1.0 - 2.0 * min(c.x, 1.0);
+    } else if (mode == 2u) {
+        return min((c.y - c.x) * 2.0, 1.0) * -2.0 + 1.0;
+    } else if (mode == 3u) {
+        return c.z * 2.0 - 1.0;
+    }
+    return 2.0 * min(c.x, 1.0) - 1.0;
+}
+
+void main() {
+    uvec2 g = gl_GlobalInvocationID.xy;
+    if (g.x >= WIDTH || g.y >= HEIGHT) {
+        return;
+    }
+    uint k = cell(g.x, g.y);
+    vec2 p = vec2(pc.f[0] + pc.f[1] * float(g.x), pc.f[2] + pc.f[3] * float(g.y));
+    float n = node_noise(p, uvec2(pc.u[2], pc.u[3]));
+    float h = pc.f[4];
+    if (pc.u[8] != 0u) {
+        h = clamp(h * clamp(height_mask[k], 0.0, 1.0), pc.f[10], pc.f[11]);
+    }
+    result[k] = pc.f[5] + (n * 0.5 + 0.5) * h;
+}

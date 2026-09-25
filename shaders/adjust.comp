@@ -1,0 +1,72 @@
+// Adjust nodes (crates/terrain-nodes/src/adjust.rs): the per-cell part of Blur
+// and Sharpen (the blur itself is shaders/core/blur_*.comp), Transform, Warp.
+//
+// Bindings: 0 input, 1 auxiliary (blurred input), 2 driving mask, 3 output.
+// u[4] mode: 0 blend towards aux by strength (Blur), 1 sharpen, 2 transform, 3 warp
+// u[5] parameter driven by mask   u[6] octaves (warp)
+// u[8..9], u[10..11] warp seeds for x and y
+// f[0] parameter value, f[1], f[2] its range when driven
+// Transform: f[3], f[4] world centre, f[5], f[6] move, f[7], f[8] cos/sin of
+//            -rotation, f[9] scale, f[10] height scale, f[11] lowest world height
+// Warp: f[3] swirl size (m)
+// f[12] origin x, f[13] cell size x, f[14] origin y, f[15] cell size y (metres)
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0, std430) readonly buffer Src { float src[]; };
+layout(set = 0, binding = 1, std430) readonly buffer Aux { float aux[]; };
+layout(set = 0, binding = 2, std430) readonly buffer Driver { float driver[]; };
+layout(set = 0, binding = 3, std430) writeonly buffer Out { float result[]; };
+
+float param_at(uint k) {
+    if (pc.u[5] == 0u) {
+        return pc.f[0];
+    }
+    return clamp(pc.f[0] * clamp(driver[k], 0.0, 1.0), pc.f[1], pc.f[2]);
+}
+
+// Bilinear sample of the input at a world position in metres, edges clamped
+// (Grid::sample_bilinear_m).
+float sample_m(vec2 pos) {
+    vec2 f = (pos - vec2(pc.f[12], pc.f[14])) / vec2(pc.f[13], pc.f[15]);
+    f = clamp(f, vec2(-2.0), vec2(float(WIDTH) + 1.0, float(HEIGHT) + 1.0));
+    vec2 f0 = floor(f);
+    vec2 t = f - f0;
+    ivec2 i = ivec2(f0);
+    float a = src[cell_clamped(i.x, i.y)];
+    float b = src[cell_clamped(i.x + 1, i.y)];
+    float c = src[cell_clamped(i.x, i.y + 1)];
+    float d = src[cell_clamped(i.x + 1, i.y + 1)];
+    float top = a + (b - a) * t.x;
+    float bottom = c + (d - c) * t.x;
+    return top + (bottom - top) * t.y;
+}
+
+void main() {
+    uvec2 g = gl_GlobalInvocationID.xy;
+    if (g.x >= WIDTH || g.y >= HEIGHT) {
+        return;
+    }
+    uint k = cell(g.x, g.y);
+    uint mode = pc.u[4];
+    vec2 pos = vec2(pc.f[12] + pc.f[13] * float(g.x), pc.f[14] + pc.f[15] * float(g.y));
+    if (mode == 0u) {
+        float a = src[k];
+        result[k] = a + (aux[k] - a) * param_at(k);
+    } else if (mode == 1u) {
+        float h = src[k];
+        result[k] = h + param_at(k) * (h - aux[k]);
+    } else if (mode == 2u) {
+        vec2 c = vec2(pc.f[3], pc.f[4]);
+        vec2 p = (pos - c - vec2(pc.f[5], pc.f[6])) / pc.f[9];
+        float cs = pc.f[7];
+        float sn = pc.f[8];
+        vec2 s = vec2(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
+        float h = sample_m(s + c);
+        result[k] = pc.f[11] + (h - pc.f[11]) * pc.f[10];
+    } else {
+        float strength = param_at(k);
+        vec2 q = pos / pc.f[3];
+        float dx = fbm(0u, q, uvec2(pc.u[8], pc.u[9]), pc.u[6], 2.0, 0.5);
+        float dy = fbm(0u, q, uvec2(pc.u[10], pc.u[11]), pc.u[6], 2.0, 0.5);
+        result[k] = sample_m(pos + vec2(dx, dy) * strength);
+    }
+}

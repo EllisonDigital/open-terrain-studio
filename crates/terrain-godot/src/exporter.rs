@@ -4,6 +4,7 @@ use godot::prelude::*;
 use terrain_core::EvalOptions;
 use terrain_core::export::{ExportFormat, ExportRequest, build_marked, export_node};
 
+use crate::gpu;
 use crate::jobs::Job;
 use crate::project::TerrainProject;
 use crate::{cache, registry};
@@ -122,6 +123,7 @@ impl TerrainExporter {
                     progress: Some(progress),
                     cache: Some(cache()),
                     base_dir: base_dir.as_deref(),
+                    gpu: gpu::for_build().as_ref(),
                 },
             )
             .map_err(|e| e.to_string())
@@ -152,6 +154,7 @@ impl TerrainExporter {
                     progress: Some(progress),
                     cache: Some(cache()),
                     base_dir: base_dir.as_deref(),
+                    gpu: gpu::for_build().as_ref(),
                 },
             )
             .map_err(|e| e.to_string())

@@ -14,6 +14,8 @@ pub struct PreviewData {
     /// Nodes computed (not taken from the cache) for this preview.
     pub computed: u64,
     pub millis: f64,
+    /// The GPU used, if any (nodes without a kernel still ran on the CPU).
+    pub gpu: Option<String>,
 }
 
 fn grid_image(grid: &Grid) -> Option<Gd<Image>> {
@@ -134,6 +136,12 @@ impl TerrainPreview {
     #[func]
     fn get_millis(&self) -> f64 {
         self.data.millis
+    }
+
+    /// Name of the GPU the preview was computed with, or "" for CPU only.
+    #[func]
+    fn get_gpu_name(&self) -> GString {
+        self.data.gpu.as_deref().unwrap_or_default().into()
     }
 
     /// Value at a world position in metres (bilinear), e.g. for a hover readout.

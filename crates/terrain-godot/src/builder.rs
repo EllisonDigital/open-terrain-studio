@@ -5,6 +5,7 @@ use godot::prelude::*;
 use terrain_core::{EvalOptions, Grid, GridSpec, PortType, evaluate_node};
 
 use crate::convert::put;
+use crate::gpu;
 use crate::jobs::Job;
 use crate::preview::{PreviewData, TerrainPreview};
 use crate::project::TerrainProject;
@@ -97,6 +98,7 @@ impl TerrainBuilder {
         let (n2, p2) = (node.clone(), port_s.clone());
         let job = Job::spawn(generation, move |cancel, progress| {
             let started = Instant::now();
+            let gpu = gpu::for_preview();
             let misses_before = cache().stats().misses;
             let spec =
                 GridSpec::full_world(&snapshot.world, resolution.max(2) as u32).map_err(|e| e.to_string())?;
@@ -113,6 +115,7 @@ impl TerrainBuilder {
                             progress,
                             cache: Some(cache()),
                             base_dir: base_dir.as_deref(),
+                            gpu: gpu.as_ref(),
                         },
                     )
                     .map_err(|e| e.to_string())?;
@@ -137,6 +140,7 @@ impl TerrainBuilder {
                 base,
                 computed: cache().stats().misses - misses_before,
                 millis: started.elapsed().as_secs_f64() * 1000.0,
+                gpu: gpu.map(|g| g.name()),
             })
         });
         self.job = Some((job, node, port_s));
@@ -167,6 +171,83 @@ impl TerrainBuilder {
         put(&mut d, "entries", s.entries as i64);
         put(&mut d, "megabytes", s.bytes as f64 / (1024.0 * 1024.0));
         d
+    }
+
+    /// The compute device: `state` ("starting", "ready" or "unavailable"),
+    /// `name`, `reason` (why there is none), `force_cpu`, `builds_on_gpu`,
+    /// and counters `nodes` (node runs on the GPU), `fallbacks` (GPU runs that
+    /// failed and used the CPU) and `last_error`. Starts the device if needed.
+    #[func]
+    fn get_gpu_status() -> VarDictionary {
+        gpu::start();
+        let mut d = VarDictionary::new();
+        put(&mut d, "force_cpu", gpu::force_cpu());
+        put(&mut d, "builds_on_gpu", gpu::builds_on_gpu());
+        match gpu::status() {
+            None => put(&mut d, "state", "starting"),
+            Some(Err(reason)) => {
+                put(&mut d, "state", "unavailable");
+                put(&mut d, "reason", GString::from(reason.as_str()));
+            }
+            Some(Ok(g)) => {
+                let stats = g.stats();
+                put(&mut d, "state", "ready");
+                put(&mut d, "name", GString::from(g.name().as_str()));
+                put(&mut d, "nodes", stats.nodes as i64);
+                put(&mut d, "fallbacks", stats.fallbacks as i64);
+                put(
+                    &mut d,
+                    "last_error",
+                    GString::from(stats.last_error.unwrap_or_default().as_str()),
+                );
+            }
+        }
+        d
+    }
+
+    /// Run every node on the CPU, even with a GPU ("Force CPU", for
+    /// debugging). Affects the next request.
+    #[func]
+    fn set_force_cpu(on: bool) {
+        gpu::set_force_cpu(on);
+    }
+
+    /// Let builds and exports use the GPU. Off by default: builds then are
+    /// bit-exact CPU results, identical on every machine.
+    #[func]
+    fn set_builds_on_gpu(on: bool) {
+        gpu::set_builds_on_gpu(on);
+    }
+
+    /// Compare every GPU kernel with its CPU version at `resolution`² (blocks;
+    /// for tests). One dictionary per output: case, port, max_error,
+    /// outliers, tolerance, tolerance_share, cpu_ms, gpu_ms, passed, error,
+    /// worst (where the largest difference is).
+    /// Empty if there is no GPU.
+    #[func]
+    fn run_gpu_check(resolution: i32) -> VarArray {
+        let mut arr = VarArray::new();
+        let Ok(g) = gpu::device() else { return arr };
+        for r in terrain_nodes::gpu_check::check_all(g, resolution.max(3) as u32) {
+            let mut d = VarDictionary::new();
+            put(&mut d, "case", GString::from(r.case.as_str()));
+            put(&mut d, "port", GString::from(r.port.as_str()));
+            put(&mut d, "max_error", r.max_error);
+            put(&mut d, "outliers", r.outliers);
+            put(&mut d, "tolerance", r.tolerance.0);
+            put(&mut d, "tolerance_share", r.tolerance.1);
+            put(&mut d, "cpu_ms", r.cpu_ms);
+            put(&mut d, "gpu_ms", r.gpu_ms);
+            put(&mut d, "passed", r.passed);
+            put(&mut d, "worst", GString::from(r.worst.as_str()));
+            put(
+                &mut d,
+                "error",
+                GString::from(r.error.unwrap_or_default().as_str()),
+            );
+            arr.push(&d.to_variant());
+        }
+        arr
     }
 
     /// Empty the result cache (e.g. to measure cold performance).

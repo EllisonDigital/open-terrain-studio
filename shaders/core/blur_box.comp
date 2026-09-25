@@ -1,0 +1,44 @@
+// Box blur along one axis, edges repeated: one invocation per row (u[2] = 0)
+// or column (u[2] = 1), with a running window sum. u[3] = radius in cells.
+// The sum is compensated (Kahan) and taken relative to the line's first value,
+// so long lines keep close to the CPU's f64 prefix sums.
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0, std430) readonly buffer Src { float src[]; };
+layout(set = 0, binding = 1, std430) writeonly buffer Dst { float dst[]; };
+
+uint line;
+
+uint at(int t, int n) {
+    uint c = uint(clamp(t, 0, n - 1));
+    return pc.u[2] == 0u ? cell(c, line) : cell(line, c);
+}
+
+precise float sum = 0.0;
+precise float lost = 0.0;
+
+void add(float x) {
+    precise float y = x - lost;
+    precise float t = sum + y;
+    lost = (t - sum) - y;
+    sum = t;
+}
+
+void main() {
+    line = gl_GlobalInvocationID.x;
+    uint lines = pc.u[2] == 0u ? HEIGHT : WIDTH;
+    if (line >= lines) {
+        return;
+    }
+    int n = int(pc.u[2] == 0u ? WIDTH : HEIGHT);
+    int r = int(pc.u[3]);
+    float width = float(2 * r + 1);
+    float ref = src[at(0, n)];
+    for (int k = -r; k <= r; k++) {
+        add(src[at(k, n)] - ref);
+    }
+    for (int t = 0; t < n; t++) {
+        dst[at(t, n)] = sum / width + ref;
+        add(src[at(t + r + 1, n)] - ref);
+        add(-(src[at(t - r, n)] - ref));
+    }
+}

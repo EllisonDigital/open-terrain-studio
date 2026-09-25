@@ -68,7 +68,8 @@ impl TerrainGraph {
             .unwrap_or_else(|| VarDictionary::new().to_variant())
     }
 
-    /// All nodes: id, type, label, category, pos (Vector2), known (bool),
+    /// All nodes: id, type, label, category, pos (Vector2), known (bool), gpu
+    /// (has a GPU kernel),
     /// inputs (including exposed parameter ports, which have a "param" key),
     /// outputs, params (effective values, defaults filled in), exposed
     /// (PackedStringArray of parameter keys) and exported (PackedStringArray of
@@ -88,6 +89,7 @@ impl TerrainGraph {
                     put(&mut d, "known", true);
                     put(&mut d, "label", GString::from(schema.label.as_str()));
                     put(&mut d, "category", GString::from(schema.category.as_str()));
+                    put(&mut d, "gpu", schema.gpu);
                     let inputs = serde_json::to_value(schema.input_ports(&node.exposed)).unwrap_or_default();
                     let outputs = serde_json::to_value(&schema.outputs).unwrap_or_default();
                     put(&mut d, "inputs", json_to_variant(&inputs));
@@ -112,6 +114,7 @@ impl TerrainGraph {
                         GString::from(format!("Unknown: {}", node.type_id).as_str()),
                     );
                     put(&mut d, "category", GString::from("Unknown"));
+                    put(&mut d, "gpu", false);
                     put(&mut d, "inputs", VarArray::new());
                     put(&mut d, "outputs", VarArray::new());
                     for (k, v) in &node.params {
