@@ -19,8 +19,12 @@ const PORT_SLOT_TYPES := {"heightfield": 0, "mask": 1}
 ## Parameter ports (masks driving a value) get their own colour.
 const PARAM_PORT_COLOR := Color(0.55, 0.9, 0.6)
 const EXPORT_BADGE_COLOR := Color(0.55, 0.9, 0.6)
+const GPU_BADGE_COLOR := Color(0.5, 0.8, 1.0)
+const CPU_BADGE_COLOR := Color(1, 1, 1, 0.35)
 
 var graph: TerrainGraph
+## A GPU is in use: badge each node with where it computes.
+var gpu_active := false
 var viewed_id := ""
 var viewed_port := ""
 
@@ -182,6 +186,16 @@ func _add_graph_node(node: Dictionary, selected: bool) -> void:
 		badge.mouse_filter = Control.MOUSE_FILTER_PASS
 		badge.add_theme_font_size_override("font_size", 10)
 		badge.add_theme_color_override("font_color", EXPORT_BADGE_COLOR)
+		gn.get_titlebar_hbox().add_child(badge)
+
+	if gpu_active and node["known"]:
+		var on_gpu: bool = node.get("gpu", false)
+		var badge := Label.new()
+		badge.text = "GPU" if on_gpu else "CPU"
+		badge.tooltip_text = "Computed on the GPU" if on_gpu else "Computed on the CPU (no GPU version yet)"
+		badge.mouse_filter = Control.MOUSE_FILTER_PASS
+		badge.add_theme_font_size_override("font_size", 10)
+		badge.add_theme_color_override("font_color", GPU_BADGE_COLOR if on_gpu else CPU_BADGE_COLOR)
 		gn.get_titlebar_hbox().add_child(badge)
 
 	_ports[node["id"]] = {

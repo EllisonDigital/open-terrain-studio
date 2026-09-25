@@ -120,6 +120,15 @@ Differences from the plan:
 
 ### v0.4 — GPU acceleration
 
+**Status (25 Sep 2026):** in progress on the `v0.4-gpu` branch. Not merged or released. Details and measurements are in [gpu.md](gpu.md).
+
+- *Done and tested:* GPU compute through a local RenderingDevice on its own thread; GPU-resident results that the next GPU node reads without a round trip; kernels for every noise node, Blur, Sharpen, Transform, Warp, Slope, Aspect (not in the plan, same kernel as Slope), Curvature and Thermal Erosion; batched submissions for long simulations, with progress and cancellation between batches; CPU fallback on any GPU error; Force CPU; automatic CPU-only mode without a device (Compatibility renderer, headless); GPU/CPU badge on each node; auto-update or manual update (F5). Preview quality already offered 256–2,048².
+- *Tolerance tests:* `app/tests/gpu_test.gd` compares 36 node cases with the CPU. All are within 100 ppm (0.01%) of the value range on Intel UHD (Mesa) and Mesa llvmpipe, on Godot 4.7.2 and 4.6.2. CI runs it on llvmpipe (`godot-gpu` job; not yet run on GitLab).
+- *Builds stay on the CPU by default*, so exports remain bit-identical on every machine; the Build tab can switch them to the GPU, and `build.json` records which was used.
+- *Exit criterion, 10+ fps slider at 1,024²:* met on the development laptop: 36 fps on its integrated GPU, 48 fps with Force CPU (fBm → Levels, request to finished preview).
+- **Not met: 2,048² erosion under 5 s.** Thermal Erosion takes 0.76 s on the integrated GPU (1.1 s on 28 CPU threads), but Hydraulic Erosion has no GPU kernel and takes 10.2 s. 96% of its time is sequential passes along the drainage tree. A GPU version needs a different, parallel routing method whose rivers won't match the CPU solver cell for cell; that decision is open.
+- **Not met: three GPU vendors.** Only Intel and a software driver were available; no NVIDIA or AMD GPU, and no RTX 3060-class GPU for the speed criteria.
+
 **Goal:** the v0.3 feature set at interactive speed, with results matching the CPU versions.
 
 **Deliverables**
