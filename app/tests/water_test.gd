@@ -69,8 +69,18 @@ func run() -> void:
 	if water != null:
 		check(is_equal_approx(water.get_pixel(0, 0).r, 150.0), "sea at its level in the corner: %s" % water.get_pixel(0, 0).r)
 		check(water.get_pixel(64, 64).r < -1.0e5, "dry mountain top")
+	var snow_cover: Image = final.get_snow_image()
+	var snowy := 0
+	if snow_cover != null:
+		for y in 129:
+			for x in 129:
+				if snow_cover.get_pixel(x, y).r > 0.5:
+					snowy += 1
+	check(snowy > 0, "snow painted on the mountain (%d snowy pixels)" % snowy)
 	builder.request_preview(project, mountain, "out", 129)
-	check((await builder.preview_ready).get_water_image() == null, "no water over the bare mountain")
+	var bare: TerrainPreview = await builder.preview_ready
+	check(bare.get_water_image() == null, "no water over the bare mountain")
+	check(bare.get_snow_image() == null, "no snow on the bare mountain")
 	builder.request_preview(project, sea, "sea", 129)
 	check((await builder.preview_ready).get_water_image() == null, "no water over a mask")
 

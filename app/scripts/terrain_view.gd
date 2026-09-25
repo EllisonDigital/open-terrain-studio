@@ -25,6 +25,7 @@ var _overlay: ImageTexture
 var _water: MeshInstance3D
 var _water_material: ShaderMaterial
 var _water_texture: ImageTexture
+var _snow_texture: ImageTexture
 var _mesh_res := 0
 var _exaggeration := 1.0
 
@@ -147,6 +148,15 @@ func show_preview(preview: TerrainPreview) -> void:
 		_build_mesh(res)
 	_terrain.visible = true
 	_show_water(null if is_mask else preview.get_water_image())
+	_show_snow(null if is_mask else preview.get_snow_image())
+
+
+## Snow cover from Snow nodes on the terrain shown (null: none).
+func _show_snow(cover: Image) -> void:
+	if cover != null:
+		_snow_texture = _update_texture(_snow_texture, cover)
+		_material.set_shader_parameter("snow_tex", _snow_texture)
+	_material.set_shader_parameter("show_snow", cover != null)
 
 
 ## Water from Rivers, Lakes and Sea over the terrain shown (null: none).

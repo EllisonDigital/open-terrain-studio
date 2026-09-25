@@ -161,11 +161,29 @@ impl TerrainBuilder {
             } else {
                 None
             };
+            // Snow to paint on a terrain: the most snow of the Snow nodes it
+            // was made with.
+            let snow = if ty == PortType::Heightfield {
+                let mut cover: Option<Vec<f32>> = None;
+                for source in snapshot.graph.snow_sources(registry(), &n2) {
+                    let Ok((snow, _)) = eval(&source, "snow", None) else {
+                        continue;
+                    };
+                    let cover = cover.get_or_insert_with(|| vec![0.0; grid.data.len()]);
+                    for (c, s) in cover.iter_mut().zip(&snow.data) {
+                        *c = c.max(*s);
+                    }
+                }
+                cover.map(|data| Arc::new(Grid { spec, data }))
+            } else {
+                None
+            };
             Ok(PreviewData {
                 grid,
                 port_type: ty,
                 base,
                 water,
+                snow,
                 computed: cache().stats().misses - misses_before,
                 millis: started.elapsed().as_secs_f64() * 1000.0,
                 gpu: gpu.map(|g| g.name()),

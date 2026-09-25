@@ -15,6 +15,9 @@ pub struct PreviewData {
     /// ([`crate::builder::DRY`] where there is no water), if any node it was
     /// made with adds water.
     pub water: Option<Arc<Grid>>,
+    /// For a heightfield: its snow cover (0..1), if any node it was made
+    /// with adds snow.
+    pub snow: Option<Arc<Grid>>,
     /// Nodes computed (not taken from the cache) for this preview.
     pub computed: u64,
     pub millis: f64,
@@ -85,6 +88,13 @@ impl TerrainPreview {
     #[func]
     fn get_water_image(&self) -> Option<Gd<Image>> {
         self.data.water.as_ref().and_then(|g| grid_image(g))
+    }
+
+    /// For a heightfield made with Snow: its snow cover, 0..1 (FORMAT_RF).
+    /// Null without snow.
+    #[func]
+    fn get_snow_image(&self) -> Option<Gd<Image>> {
+        self.data.snow.as_ref().and_then(|g| grid_image(g))
     }
 
     /// Node id of the base terrain, or "".
