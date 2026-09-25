@@ -4,8 +4,10 @@
 //! # One node type with default settings (inputs fed from a smooth fBm):
 //! cargo run --release -p terrain-nodes --example render -- terrain.mountain out.png [resolution]
 //! # A node in a project (the viewed node if none is given):
-//! cargo run --release -p terrain-nodes --example render -- project.otstudio out.png [resolution] [node]
+//! cargo run --release -p terrain-nodes --example render -- project.otstudio out.png [resolution] [node] [output]
 //! ```
+//!
+//! The node's first output is drawn unless another output (e.g. `flow`) is named.
 //!
 //! Heightfields are hillshaded with a height tint; masks are drawn in grey.
 
@@ -16,7 +18,7 @@ use terrain_core::{EvalOptions, Grid, GridSpec, Project, Value, evaluate_node};
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 2 {
-        eprintln!("usage: render <type_id | project.otstudio> <out.png> [resolution] [node]");
+        eprintln!("usage: render <type_id | project.otstudio> <out.png> [resolution] [node] [output]");
         std::process::exit(2);
     }
     let reg = terrain_nodes::registry();
@@ -27,7 +29,7 @@ fn main() {
         for w in warnings {
             eprintln!("warning: {w}");
         }
-        let node = args.get(3).cloned().unwrap_or_else(|| {
+        let node = args.get(3).filter(|a| !a.is_empty()).cloned().unwrap_or_else(|| {
             p.ui["viewed_node"]
                 .as_str()
                 .map(String::from)
@@ -67,7 +69,14 @@ fn main() {
     )
     .unwrap_or_else(|e| panic!("{e}"));
     let ms = t.elapsed().as_secs_f64() * 1000.0;
-    let value = out.values().next().unwrap();
+    let type_id = &project.graph.node(&node).unwrap().type_id;
+    let port = args
+        .get(4)
+        .cloned()
+        .unwrap_or_else(|| reg.schema(type_id).unwrap().outputs[0].key.clone());
+    let value = out
+        .get(&port)
+        .unwrap_or_else(|| panic!("{node} has no output '{port}'"));
     let (lo, hi) = value.grid().min_max();
     println!("{node} at {res}²: {lo:.2} .. {hi:.2}  ({ms:.0} ms)");
     let rgb = match value {

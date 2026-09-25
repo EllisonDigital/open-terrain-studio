@@ -93,6 +93,14 @@ Differences from the plan:
 
 ### v0.3 — Erosion
 
+**Status (25 Sep 2026):** in progress on the `v0.3-integration` branch (the CPU erosion from `v0.3-erosion` on top of v0.2). Not merged or released.
+
+- *Done and tested:* Hydraulic Erosion (Height, Flow, Wear, Deposition, Sediment), Thermal Erosion (Height, Debris/Talus), Rock Hardness, strength and hardness inputs, progress and cancellation inside a simulation (a cancelled result is never cached), Rayon with bit-identical results for 1 and 8 workers, and 512²/2,048² comparisons of the erosion change and every mask. The editor gained an Output picker for nodes with several outputs, and masks drape over their node's own eroded Height. There is an *Eroded strata* example.
+- *Exit criterion, speed:* 1,024² hydraulic, 60 s simulated, 8 workers: 2.4 s (i7-14700HX), far below 30 s.
+- *Exit criterion, determinism:* met across thread counts on one machine; not yet compared on a second machine or OS.
+- *Exit criterion, Unreal masks:* PNG/EXR mask values round-trip exactly, but nothing has been imported into Unreal.
+- **Not met: the goal, natural-looking erosion.** On the alpine example, hydraulic erosion planes slopes smooth and fills valleys instead of cutting branching channels, at every setting tried (rain 0.002–0.05 m/s, 60–600 s, capacity 2–8, deposition 0.1–0.5), with some grid-aligned artefacts along crests. Uniform rain over a grid water sheet makes erosion act like diffusion. Thermal erosion behaves as intended but its defaults remove hundreds of metres from steep peaks in 60 s. The solver needs erosion that concentrates with drained area before v0.3 can be called done.
+
 **Goal:** natural-looking eroded terrain, the core of the Gaea look, on the CPU.
 
 **Deliverables**

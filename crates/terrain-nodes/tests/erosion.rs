@@ -309,8 +309,7 @@ fn erosion_masks_export_as_linear_16_bit_png_and_float_exr() {
                 folder: &folder,
                 formats: &[ExportFormat::Png16, ExportFormat::Exr32],
             },
-            None,
-            None,
+            &EvalOptions::default(),
         )
         .unwrap();
         let png = image::open(files.iter().find(|p| p.extension().unwrap() == "png").unwrap()).unwrap();
@@ -336,7 +335,7 @@ fn shipped_erosion_project_loads_and_its_marked_outputs_exist() {
     use terrain_core::{EvalOptions, Project, evaluate_node};
     let reg = terrain_nodes::registry();
     let (p, warnings) =
-        Project::from_json(include_str!("../../../presets/erosion-strata.otstudio"), &reg).unwrap();
+        Project::from_json(include_str!("../../../app/examples/eroded_strata.otstudio"), &reg).unwrap();
     assert!(warnings.is_empty(), "{warnings:?}");
     for mark in &p.exports {
         let node = p.graph.node(&mark.node).unwrap();
@@ -353,4 +352,21 @@ fn shipped_erosion_project_loads_and_its_marked_outputs_exist() {
     )
     .unwrap();
     assert!(out["height"].grid().data.iter().all(|v| v.is_finite()));
+}
+
+/// Flow shows runoff: dark where water divides (crests), bright where it has
+/// gathered from upslope, and never saturated.
+#[test]
+fn flow_is_dark_on_crests_and_bright_on_flanks() {
+    // A ridge along y at x = 512 m.
+    let spec = GridSpec::full_world(&world(), 129).unwrap();
+    let g = Grid::from_fn(spec, |x, y| (400.0 - (x - 512.0).abs() * 0.4 + y * 0.05) as f32);
+    let out = run(&Hydraulic::default(), &g, &[], None, None);
+    let flow = out["flow"].grid();
+    let (crest, flank) = (flow.get(64, 64), flow.get(24, 64));
+    assert!(
+        flank > crest + 0.2,
+        "flank {flank} should be much brighter than the crest {crest}"
+    );
+    assert!(flow.data.iter().all(|&v| v < 0.95), "flow saturated");
 }

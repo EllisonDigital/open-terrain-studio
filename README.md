@@ -108,7 +108,8 @@ says how many ("1 node computed, 7 ms").
 | Terrain | Mountain, Ridge, Canyon, Crater, Plateau, Dunes |
 | Adjust | Levels, Curve, Clamp, Invert, Terrace, Blur, Sharpen, Transform, Warp |
 | Combine | Combine (add, subtract, multiply, max, min, blend; optional mask) |
-| Data (masks) | Height Mask, Slope, Curvature, Aspect, Select Range, Distance |
+| Data (masks) | Height Mask, Slope, Curvature, Aspect, Select Range, Distance, Rock Hardness (v0.3, in progress) |
+| Simulate | Hydraulic Erosion, Thermal Erosion (v0.3, in progress: see the roadmap) |
 
 ### Tests
 

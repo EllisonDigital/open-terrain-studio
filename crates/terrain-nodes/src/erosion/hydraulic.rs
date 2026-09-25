@@ -11,7 +11,7 @@ impl Default for Hydraulic {
         Self {
             schema: schema(
                 "simulate.hydraulic",
-                "Hydraulic erosion",
+                "Hydraulic Erosion",
                 "Rain transports sediment downhill. Strength protects terrain; hardness resists wear. Boundaries are closed.",
                 &[
                     ("flow", "Flow"),
@@ -51,6 +51,11 @@ struct Cell {
     deposition: f32,
 }
 const MAX_SPEED: f32 = 10.0; // m/s on each face; bounds transport CFL.
+/// Flow mask scale: specific catchment area (drained area per metre of flow
+/// width, in metres) mapped logarithmically to 0..1, from FLOW_LO_M (black)
+/// to FLOW_HI_M (white). Fixed in metres, so masks match at any resolution.
+const FLOW_LO_M: f64 = 10.0;
+const FLOW_HI_M: f64 = 1000.0;
 impl NodeKind for Hydraulic {
     fn schema(&self) -> &NodeSchema {
         &self.schema
@@ -111,6 +116,7 @@ impl NodeKind for Hydraulic {
                 let mut water_delta = 0.0;
                 let mut sediment_delta = 0.0;
                 let mut discharge = 0.0;
+                let mut passed = 0.0;
                 let mut slope = 0.0f32;
                 let mut relief = 0.0f32;
                 for (k, j) in neighbours(i, d.width, d.len).into_iter().enumerate() {
@@ -125,6 +131,7 @@ impl NodeKind for Hydraulic {
                     };
                     sediment_delta += incoming * neighbour_concentration - outgoing * concentration;
                     discharge += outgoing * d.distance[k];
+                    passed += outgoing;
                     let drop = (c.height - cells[j].height).max(0.0);
                     slope = slope.max(drop / d.distance[k]);
                     relief = relief.max(drop);
@@ -144,7 +151,7 @@ impl NodeKind for Hydraulic {
                     height: c.height + (deposited - wear),
                     water,
                     sediment,
-                    flow: c.flow + discharge,
+                    flow: c.flow + passed,
                     wear: c.wear + wear,
                     deposition: c.deposition + deposited,
                 };
@@ -157,8 +164,32 @@ impl NodeKind for Hydraulic {
         }
         check_cancel(ctx)?;
         let mut outputs = height_out(cells.par_iter().map(|c| c.height).collect(), ctx);
+        // Flow: the water depth that left each cell over the run, times the
+        // cell's area, over the rain depth that fell = the area whose rain
+        // drained through the cell. Divided by the cell's width, that is the
+        // specific catchment area (m), which doesn't depend on resolution
+        // (the area itself grows with cell width).
+        let rain_depth = ctx.f64("rainfall_m_s") * ctx.f64("duration_s");
+        let cell_width = (d.distance[0] as f64 * d.distance[2] as f64).sqrt();
+        let span = libm::log10(FLOW_HI_M / FLOW_LO_M);
+        let flow = cells
+            .par_iter()
+            .map(|c| {
+                if rain_depth <= 0.0 {
+                    return 0.0;
+                }
+                let length = c.flow as f64 * cell_width / rain_depth;
+                (libm::log10(length.max(FLOW_LO_M) / FLOW_LO_M) / span).min(1.0) as f32
+            })
+            .collect();
+        outputs.insert(
+            "flow".into(),
+            Value::Mask(Arc::new(Grid {
+                spec: ctx.spec,
+                data: flow,
+            })),
+        );
         for (key, scale, field) in [
-            ("flow", 10.0, (|c: &Cell| c.flow) as fn(&Cell) -> f32),
             ("wear", 1.0, (|c: &Cell| c.wear) as fn(&Cell) -> f32),
             ("deposition", 1.0, (|c: &Cell| c.deposition) as fn(&Cell) -> f32),
             ("sediment", 1.0, (|c: &Cell| c.sediment) as fn(&Cell) -> f32),

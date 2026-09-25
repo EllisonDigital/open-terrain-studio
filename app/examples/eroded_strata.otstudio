@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "app_version": "0.1.0",
+  "app_version": "0.3.0",
   "world": {
     "size_m": [
       4096.0,
@@ -52,7 +52,7 @@
       }
     },
     {
-      "id": "n_4",
+      "id": "n_0004",
       "type": "data.rock_hardness",
       "type_version": 1,
       "pos": [
@@ -74,7 +74,7 @@
         "out"
       ],
       "to": [
-        "n_4",
+        "n_0004",
         "in"
       ]
     },
@@ -90,7 +90,7 @@
     },
     {
       "from": [
-        "n_4",
+        "n_0004",
         "out"
       ],
       "to": [
@@ -146,6 +146,7 @@
     "folder": "output/erosion"
   },
   "ui": {
-    "viewed_node": "n_0003"
+    "viewed_node": "n_0003",
+    "preview_resolution": 1024
   }
 }

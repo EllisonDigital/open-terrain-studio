@@ -41,6 +41,11 @@ func run() -> void:
 			var preview: TerrainPreview = await builder.preview_ready
 			check(preview.get_port() == port and preview.get_node_id() == node, "preview output " + port)
 			check(preview.get_image().get_width() == 129, "129² output image")
+			# One simulation serves every output: only the first port computes it.
+			if port != ports[0]:
+				check(preview.get_computed_nodes() == 0, "%s reused the cached simulation" % port)
+			if node == hydraulic and port != "height":
+				check(preview.get_base_node_id() == hydraulic, "%s drapes over the eroded height" % port)
 			if port != "height":
 				check(preview.get_port_type() == "mask" and preview.get_min() >= 0.0 and preview.get_max() <= 1.0, "normalised mask " + port)
 	# A long-running preview reports progress inside hydraulic, then is cancelled.
@@ -60,5 +65,10 @@ func run() -> void:
 	builder.preview_ready.connect(func(_preview): stale_delivered[0] = true)
 	await create_timer(0.1).timeout
 	check(not stale_delivered[0], "cancelled result is discarded")
+	# The same request again runs to completion: nothing partial was cached.
+	graph.set_param(hydraulic, "duration_s", 20.0)
+	builder.request_preview(project, hydraulic, "height", 256)
+	var finished: TerrainPreview = await builder.preview_ready
+	check(finished.get_computed_nodes() >= 1, "re-requested simulation completed (%d nodes computed)" % finished.get_computed_nodes())
 	print("EROSION FAILED: %d" % failures if failures else "EROSION ALL PASSED")
 	quit(1 if failures else 0)

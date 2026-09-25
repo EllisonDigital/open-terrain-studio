@@ -22,6 +22,7 @@ const EXPORT_BADGE_COLOR := Color(0.55, 0.9, 0.6)
 
 var graph: TerrainGraph
 var viewed_id := ""
+var viewed_port := ""
 
 # node id -> {"inputs": [keys], "outputs": [keys]}
 var _ports := {}
@@ -103,8 +104,10 @@ func rebuild() -> void:
 	_mark_viewed()
 
 
-func set_viewed(id: String) -> void:
+## Mark the viewed node (and, for nodes with several outputs, the viewed output).
+func set_viewed(id: String, port := "") -> void:
 	viewed_id = id
+	viewed_port = port
 	_mark_viewed()
 
 
@@ -160,6 +163,8 @@ func _add_graph_node(node: Dictionary, selected: bool) -> void:
 				left.text = inputs[i]["label"] + ("" if not inputs[i]["optional"] else " (opt.)")
 		if i < outputs.size():
 			right.text = outputs[i]["label"]
+			right.set_meta("port", outputs[i]["key"])
+			right.set_meta("label", outputs[i]["label"])
 		row.add_child(left)
 		row.add_child(right)
 		gn.add_child(row)
@@ -192,6 +197,11 @@ func _mark_viewed() -> void:
 			var gn := child as GraphNode
 			var label := gn.title.trim_prefix("▶ ")
 			gn.title = ("▶ " + label) if gn.name == viewed_id else label
+			# Several outputs: point at the one being viewed.
+			var outs := gn.find_children("*", "Label", true, false).filter(func(l): return l.has_meta("port"))
+			for l in outs:
+				var viewed: bool = outs.size() > 1 and gn.name == viewed_id and l.get_meta("port") == viewed_port
+				l.text = ("▶ " if viewed else "") + String(l.get_meta("label"))
 
 
 func _selected_ids() -> Array[String]:

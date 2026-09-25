@@ -156,9 +156,13 @@ pub trait NodeKind: Send + Sync {
 
 `NodeSchema` lists typed input ports, typed output ports and parameters (type, default, range, unit, UI hint). The Godot inspector and graph editor are generated from the schema, so adding a node needs no UI code.
 
+> **Added 25 Sep 2026 (v0.3 integration):** long nodes report their own progress with `EvalContext::report_progress(0..1)`, which the evaluator maps into overall progress, and check `is_cancelled()` between passes. If a node returns after cancellation its result is discarded and never cached.
+
 **Ports and types.** Ports are typed (`Heightfield`, `Mask`, `ColorMap`, `PointSet`, `Scalar`…). The editor only allows compatible connections; a few automatic conversions exist (e.g. `Heightfield` → `Mask` by normalising to the height range).
 
 **Multi-output nodes.** Nodes can have several outputs. Erosion outputs Height, Flow, Wear, Deposition and Sediment; Trees outputs Density, Points and Dead zones. Every output can be previewed and exported.
+
+> **Added 25 Sep 2026 (v0.3 integration):** one evaluation computes all of a node's outputs and they are cached together, so switching from Height to Flow reuses the same simulation. The editor's toolbar has an *Output* picker for nodes with several outputs, and the viewed output is saved with the project (`ui.viewed_port`). A mask is draped over its own node's Heightfield output when the node has one (e.g. Flow over the eroded Height); otherwise over the nearest Heightfield upstream.
 
 **Parameter inputs.** Most scalar parameters can optionally become an input port, so a mask can drive e.g. erosion strength spatially, as in Gaea.
 

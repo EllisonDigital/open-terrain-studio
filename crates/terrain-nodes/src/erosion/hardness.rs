@@ -11,7 +11,7 @@ impl Default for RockHardness {
     fn default() -> Self {
         Self { schema: NodeSchema {
             type_id: "data.rock_hardness".into(), type_version: 1,
-            label: "Rock hardness".into(), category: "Data / masks".into(), gpu: false,
+            label: "Rock Hardness".into(), category: "Data".into(), gpu: false,
             description: "Alternating soft and hard horizontal beds. Connect to an erosion node's Rock hardness input.".into(),
             inputs: vec![PortDef::new("in", "Terrain", PortType::Heightfield)],
             outputs: vec![PortDef::new("out", "Hardness", PortType::Mask)],

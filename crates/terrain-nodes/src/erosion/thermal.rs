@@ -10,7 +10,7 @@ impl Default for Thermal {
         Self {
             schema: schema(
                 "simulate.thermal",
-                "Thermal erosion",
+                "Thermal Erosion",
                 "Moves loose material down slopes steeper than the talus angle. Strength blocks transfer; hardness resists shedding.",
                 &[("debris", "Debris / Talus")],
                 vec![

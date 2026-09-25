@@ -1,6 +1,6 @@
 # CPU erosion
 
-The v0.3 node package adds **Hydraulic erosion**, **Thermal erosion** and **Rock hardness**. Open `presets/erosion-strata.otstudio` for an editable fBm → hydraulic → thermal example with alternating hard and soft beds. The project marks Height, Flow, Wear, Deposition, Sediment and Debris for export through v0.2's Build tab.
+The v0.3 node package adds **Hydraulic erosion**, **Thermal erosion** and **Rock hardness**. Open `app/examples/eroded_strata.otstudio` (*File → Open Example → Eroded strata*; moved from `presets/erosion-strata.otstudio` on 25 Sep 2026 so the packaged app includes it) for an editable fBm → hydraulic → thermal example with alternating hard and soft beds. The project marks Height, Flow, Wear, Deposition, Sediment and Debris for export through v0.2's Build tab.
 
 ## Nodes and units
 
@@ -41,6 +41,8 @@ A disconnected strength map means full strength; a disconnected hardness map mea
 Wear is cumulative material removed; deposition is cumulative material settled. Sediment is material **still suspended** at the end, not silently discarded or baked into Height. Their physical values are depths in metres before conversion to masks. Debris is the **positive net increase in terrain height** from thermal transport, not the number of times particles crossed a cell.
 
 These four masks use `m = depth / (1 m + depth)`. Thus 0 means none, 0.5 means one metre and 0.9 means nine metres. Flow integrates outgoing water discharge over the simulation in m² and uses `m = discharge / (10 m² + discharge)`. Flow indicates moving water over the simulation; it is not the watershed/flow-accumulation node planned for v0.5. These fixed scales preserve contrast between resolutions and world regions, without image-dependent auto-normalisation. Adjust masks downstream when a material needs different contrast.
+
+> **Changed 25 Sep 2026 (v0.3 integration):** Flow no longer uses `discharge / (10 m² + discharge)`. With the default rain almost every cell passed more than 10 m² within 60 s, so the mask was white everywhere except crests and couldn't separate gullies from open slopes. Flow is now the **specific catchment area** of the runoff: the water depth that left a cell over the run × the cell's area ÷ the rain depth that fell (the area whose rain drained through the cell), divided by the cell's width. Raw drained area grows with cell width (it halved from 257² to 513² to 1,025² in the strata example), but area per metre of width stays within about 15% (p50 59, 55, 50 m). The mask maps it logarithmically: 10 m or less = 0, 1,000 m = 1. In the 512²/2,048² fixtures Flow now differs by an RMS of 0.003–0.004 while showing real contrast (before, the two resolutions agreed mainly because both were saturated). It still measures runoff reached within the simulated duration (water travels a limited distance in 60 s): crests are dark, gathering slopes and gullies bright, but a gently sloping valley floor is not brighter than its sides. Whole-catchment drainage remains the v0.5 flow-accumulation node.
 
 The existing exporter writes masks directly as linear 0–1 float EXR or 16-bit greyscale PNG (0–65535). It does not apply the terrain's height range to masks. Automated round-trip tests check both formats. Actual texture setup in Unreal remains an integration/artist check; no Unreal instance was used to validate this branch.
 

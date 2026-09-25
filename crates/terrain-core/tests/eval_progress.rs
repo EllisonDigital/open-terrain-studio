@@ -132,5 +132,9 @@ fn cancelled_results_are_never_cached() {
         },
     )
     .unwrap();
-    assert_eq!(cache.stats().entries, cached_before + 1, "the cancelled node was cached");
+    assert_eq!(
+        cache.stats().entries,
+        cached_before + 1,
+        "the cancelled node was cached"
+    );
 }
