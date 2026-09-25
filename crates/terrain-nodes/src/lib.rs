@@ -71,6 +71,7 @@ pub fn registry() -> NodeRegistry {
     r.register(data::SelectRange::default());
     r.register(data::Distance::default());
     r.register(water::Flow::default());
+    r.register(water::Wetness::default());
     r.register(erosion::RockHardness::default());
     // Simulate
     r.register(erosion::Hydraulic::default());

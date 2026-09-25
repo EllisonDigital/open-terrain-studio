@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use terrain_core::{EvalContext, Grid, GridSpec, NodeKind, Outputs, ParamValue, Value, World};
-use terrain_nodes::water::{Flow, Lakes, Rivers, Sea, Snow};
+use terrain_nodes::water::{Flow, Lakes, Rivers, Sea, Snow, Wetness};
 
 fn world() -> World {
     World {
@@ -360,4 +360,50 @@ fn snow_covers_high_shaded_slopes_first_and_adds_depth() {
     // Full melt clears everything.
     let melted = run(&Snow::default(), &g, &[("melt", ParamValue::Float(1.0))]);
     assert!(melted["snow"].grid().data.iter().all(|v| *v == 0.0));
+}
+
+#[test]
+fn wetness_is_high_on_valley_floors_and_near_water() {
+    let g = two_valleys(129);
+    let out = run(
+        &Wetness::default(),
+        &g,
+        &[("stream_area_km2", ParamValue::Float(0.02))],
+    );
+    let (wet, dist) = (out["wetness"].grid(), out["water_distance"].grid());
+    let floor = (10..60).map(|j| wet.get(32, j)).sum::<f32>() / 50.0;
+    let ridge = (10..60).map(|j| wet.get(64, j)).sum::<f32>() / 50.0;
+    assert!(floor > ridge + 0.3, "floor {floor}, ridge {ridge}");
+    assert!(dist.get(64, 40) > dist.get(34, 40));
+
+    // A connected water mask counts as water.
+    let pond = Grid::from_fn(g.spec, |x, y| {
+        if (x - 512.0).abs() < 20.0 && (y - 900.0).abs() < 20.0 {
+            1.0
+        } else {
+            0.0
+        }
+    });
+    let world = world();
+    let node = Wetness::default();
+    let inputs = BTreeMap::from([
+        ("in".into(), Value::Heightfield(Arc::new(g.clone()))),
+        ("water".into(), Value::Mask(Arc::new(pond))),
+    ]);
+    let params = BTreeMap::from([("stream_area_km2".into(), ParamValue::Float(100_000.0))]);
+    let out = node
+        .evaluate(&EvalContext::new(
+            &world,
+            g.spec,
+            7,
+            "water",
+            node.schema(),
+            &params,
+            inputs,
+        ))
+        .unwrap();
+    let dist = out["water_distance"].grid();
+    assert_eq!(dist.get(64, 112), 0.0);
+    assert!(dist.get(64, 100) > 0.5 && dist.get(64, 100) < 1.0);
+    assert_eq!(dist.get(10, 10), 1.0);
 }

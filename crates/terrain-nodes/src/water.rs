@@ -893,6 +893,114 @@ impl NodeKind for Snow {
     }
 }
 
+// ---- Wetness ----------------------------------------------------------------
+
+/// How damp the ground is, from drainage and nearness to water.
+pub struct Wetness {
+    schema: NodeSchema,
+}
+
+impl Default for Wetness {
+    fn default() -> Self {
+        Self {
+            schema: NodeSchema {
+                type_id: "data.wetness".into(),
+                type_version: 1,
+                label: "Wetness".into(),
+                category: "Data".into(),
+                description: "How damp the ground is, for placing vegetation: white where water collects \
+                              (large drained area on gentle ground) and near water. Water is the Water mask \
+                              if connected (e.g. a River, Lakes or Sea mask), plus streams. Water distance \
+                              is black at the water, white Reach metres away."
+                    .into(),
+                inputs: vec![
+                    PortDef::new("in", "Terrain", PortType::Heightfield),
+                    PortDef::new("water", "Water", PortType::Mask).optional(),
+                ],
+                outputs: vec![
+                    PortDef::new("wetness", "Wetness", PortType::Mask),
+                    PortDef::new("water_distance", "Water distance", PortType::Mask),
+                ],
+                params: vec![
+                    ParamDef::metres("reach_m", "Reach", 150.0, 1.0, 100_000.0)
+                        .describe("How far from water the ground stays damp, in metres."),
+                    ParamDef::float("stream_area_km2", "Stream area", 0.5, 0.001, 100_000.0)
+                        .unit("km²")
+                        .describe("Drained area at which a stream counts as water."),
+                    detail_param(8.0),
+                ],
+                gpu: false,
+            },
+        }
+    }
+}
+
+/// Topographic wetness index ln(a / tan β) mapped to 0..1 over this range.
+const TWI_DRY: f64 = 4.0;
+const TWI_WET: f64 = 14.0;
+
+impl NodeKind for Wetness {
+    fn schema(&self) -> &NodeSchema {
+        &self.schema
+    }
+    fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        let t = terrain(ctx)?;
+        ctx.report_progress(0.0);
+        let d = Drainage::new(ctx, t);
+        let (w, ht) = d.size();
+        let [dx, dy] = d.spec.cell_size_m();
+        let r = d.route();
+        check_cancel(ctx)?;
+        let (area, _) = accumulate(&r, &r.filled, w, ht, dx, dy, true);
+        let (gx, gy) = gradient(&Grid {
+            spec: d.spec,
+            data: d.heights.iter().map(|&v| v as f32).collect(),
+        });
+        let width = 0.5 * (dx + dy);
+        let twi: Vec<f32> = (0..area.len())
+            .map(|i| {
+                let tan = ((gx.data[i] * gx.data[i] + gy.data[i] * gy.data[i]) as f64)
+                    .sqrt()
+                    .max(1.0e-3);
+                let index = libm::log(area[i] / width / tan);
+                ((index - TWI_DRY) / (TWI_WET - TWI_DRY)).clamp(0.0, 1.0) as f32
+            })
+            .collect();
+        let twi = gaussian_blur(
+            &Grid {
+                spec: d.spec,
+                data: twi,
+            },
+            0.5 * dx,
+        );
+        let twi = d.to_output(ctx, twi.data, true);
+        check_cancel(ctx)?;
+        ctx.report_progress(0.6);
+
+        // Distance to streams on the drainage grid (the same at every
+        // resolution), and to connected water at full resolution.
+        let reach = ctx.f64("reach_m") as f32;
+        let stream = ctx.f64("stream_area_km2") * 1.0e6;
+        let streams: Vec<bool> = area.iter().map(|&a| a >= stream).collect();
+        let to_stream = distance_to(d.spec, &streams).map(|v| (v / reach).min(1.0));
+        let mut distance = d.to_output(ctx, to_stream.data, true);
+        if let Some(water) = ctx.input("water") {
+            let wet: Vec<bool> = water.grid().data.iter().map(|&v| v > 0.5).collect();
+            let to_water = distance_to(ctx.spec, &wet);
+            for (v, w) in distance.data.iter_mut().zip(&to_water.data) {
+                *v = v.min(w / reach).min(1.0);
+            }
+        }
+        let wetness =
+            twi.map_indexed(|i, v| 1.0 - (1.0 - v) * (1.0 - smoothstep(1.0, 0.0, distance.data[i])));
+        ctx.report_progress(1.0);
+        Ok(Outputs::from([
+            ("wetness".into(), mask(wetness)),
+            ("water_distance".into(), mask(distance)),
+        ]))
+    }
+}
+
 // ---- Flow -------------------------------------------------------------------
 
 /// Tarboton's D-infinity facets: (cardinal neighbour, diagonal neighbour).
