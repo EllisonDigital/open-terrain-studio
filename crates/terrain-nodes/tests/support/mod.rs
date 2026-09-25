@@ -4,7 +4,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use terrain_core::{EvalOptions, Grid, GridSpec, NodeRegistry, ParamValue, PortType, Project, evaluate_node};
+use terrain_core::{
+    EvalOptions, Grid, GridSpec, NodeRegistry, ParamValue, PortType, Project, Value, evaluate_node,
+};
 
 pub fn registry() -> NodeRegistry {
     terrain_nodes::registry()
@@ -41,7 +43,12 @@ pub fn project_for(reg: &NodeRegistry, type_id: &str, files: &Path) -> (Project,
     let id = p.graph.add_node(reg, type_id, [0.0, 0.0]).unwrap();
     let schema = reg.schema(type_id).unwrap().clone();
     for input in schema.inputs.iter().filter(|i| !i.optional) {
-        let src = smooth_source(reg, &mut p);
+        let mut src = smooth_source(reg, &mut p);
+        if input.ty == PortType::ColorMap {
+            let colour = p.graph.add_node(reg, "colour.colourise", [0.0, 0.0]).unwrap();
+            p.graph.connect(reg, &src, "out", &colour, "in").unwrap();
+            src = colour;
+        }
         p.graph.connect(reg, &src, "out", &id, &input.key).unwrap();
     }
     // Simulations: a short run keeps the all-node checks fast; tests/erosion*.rs
@@ -53,7 +60,7 @@ pub fn project_for(reg: &NodeRegistry, type_id: &str, files: &Path) -> (Project,
                 .unwrap();
         }
     }
-    if type_id == "primitive.file" {
+    if type_id == "primitive.file" || type_id == "colour.image" {
         let png = test_png(files);
         p.graph
             .set_param(
@@ -80,9 +87,32 @@ pub fn smooth_source(reg: &NodeRegistry, p: &mut Project) -> String {
     src
 }
 
-/// Evaluate `node` over the whole world; returns its first declared output.
+/// Evaluate `node` over the whole world; returns its first output (by key).
 pub fn eval(p: &Project, reg: &NodeRegistry, node: &str, res: u32) -> (Arc<Grid>, PortType) {
-    eval_with(p, reg, node, res, &EvalOptions::default())
+    let v = eval_value(p, reg, node, res);
+    let ty = v.port_type();
+    match v.color() {
+        // Colour maps: the channels side by side, for whole-grid checks.
+        Some(c) => (
+            Arc::new(Grid {
+                spec: GridSpec {
+                    width: c.spec.width * 4,
+                    ..c.spec
+                },
+                data: c.data.clone(),
+            }),
+            ty,
+        ),
+        None => (v.grid().clone(), ty),
+    }
+}
+
+/// Evaluate `node` over the whole world; returns its first output (by key).
+pub fn eval_value(p: &Project, reg: &NodeRegistry, node: &str, res: u32) -> Value {
+    let spec = GridSpec::full_world(&p.world, res).unwrap();
+    let out = evaluate_node(&p.graph, reg, &p.world, spec, node, &EvalOptions::default())
+        .unwrap_or_else(|e| panic!("{node}: {e}"));
+    out.values().next().unwrap().clone()
 }
 
 pub fn eval_with(

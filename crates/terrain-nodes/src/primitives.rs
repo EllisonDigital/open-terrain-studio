@@ -6,7 +6,6 @@ use std::path::Path;
 
 use terrain_core::error::{CoreError, Result};
 use terrain_core::import::{ImageValues, read_height_image};
-use terrain_core::node::resolve_path;
 use terrain_core::ops::smoothstep64;
 use terrain_core::{
     EvalContext, Grid, NodeKind, NodeSchema, Outputs, ParamDef, ParamValue, PortDef, PortType,
@@ -363,22 +362,7 @@ impl NodeKind for File {
 
     /// Re-read the file when it changes on disk.
     fn cache_salt(&self, params: &BTreeMap<String, ParamValue>, base_dir: Option<&Path>) -> String {
-        let path = params.get("path").and_then(|v| v.as_str()).unwrap_or_default();
-        let Some(p) = resolve_path(path, base_dir) else {
-            return String::new();
-        };
-        match std::fs::metadata(&p) {
-            Ok(m) => {
-                let modified = m
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0);
-                format!("{}|{}|{modified}", p.display(), m.len())
-            }
-            Err(_) => format!("{}|missing", p.display()),
-        }
+        crate::common::file_salt(params, "path", base_dir)
     }
 }
 

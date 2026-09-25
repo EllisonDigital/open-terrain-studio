@@ -65,6 +65,9 @@ pub enum ParamKind {
     /// A response curve: control points `[x, y]` in 0..1, sorted by x.
     /// Stored as a JSON array of pairs.
     Curve,
+    /// A colour gradient: stops `[t, r, g, b]` (t and sRGB colour in 0..1),
+    /// sorted by t. Stored as a JSON array of stops.
+    Gradient,
     /// A file path, relative to the project file or absolute.
     /// `filters` are file-dialog patterns such as `"*.png ; PNG image"`.
     File {
@@ -169,6 +172,19 @@ impl ParamDef {
         }
     }
 
+    /// A colour gradient with default `stops` (`[t, r, g, b]`, sRGB 0..1).
+    pub fn gradient(key: &str, label: &str, stops: &[[f64; 4]]) -> Self {
+        Self {
+            key: key.into(),
+            label: label.into(),
+            kind: ParamKind::Gradient,
+            default: Gradient::from_stops(stops.to_vec()).to_value(),
+            unit: String::new(),
+            description: String::new(),
+            drivable: false,
+        }
+    }
+
     /// A file path (empty by default).
     pub fn file(key: &str, label: &str, filters: &[&str]) -> Self {
         Self {
@@ -241,6 +257,7 @@ impl ParamDef {
                 let points = Curve::parse(value).map_err(|e| bad(&e))?;
                 Ok(points.to_value())
             }
+            ParamKind::Gradient => Ok(Gradient::parse(value).map_err(|e| bad(&e))?.to_value()),
             ParamKind::File { .. } => value
                 .as_str()
                 .map(|s| ParamValue::Text(s.trim().into()))
@@ -369,6 +386,87 @@ impl Curve {
     }
 }
 
+/// Most stops a gradient may have.
+pub const MAX_GRADIENT_STOPS: usize = 64;
+
+/// A colour gradient: sRGB colours at positions 0..1, interpolated linearly
+/// between stops (in sRGB, as painting apps do) and held beyond the ends.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Gradient {
+    stops: Vec<[f64; 4]>,
+}
+
+impl Gradient {
+    /// Parse and normalise stored stops: values clamped to 0..1, sorted by t.
+    /// Needs at least one stop.
+    pub fn parse(value: &ParamValue) -> std::result::Result<Self, String> {
+        let bad = || "expected a list of [t, r, g, b] stops".to_string();
+        let ParamValue::Other(json) = value else {
+            return Err(bad());
+        };
+        let arr = json.as_array().ok_or_else(bad)?;
+        if arr.is_empty() || arr.len() > MAX_GRADIENT_STOPS {
+            return Err(format!("a gradient needs 1 to {MAX_GRADIENT_STOPS} stops"));
+        }
+        let mut stops = Vec::with_capacity(arr.len());
+        for s in arr {
+            let s = s
+                .as_array()
+                .filter(|a| a.len() == 4)
+                .ok_or("each stop must be [t, r, g, b]")?;
+            let mut stop = [0.0; 4];
+            for (v, j) in stop.iter_mut().zip(s) {
+                let x = j
+                    .as_f64()
+                    .filter(|x| x.is_finite())
+                    .ok_or("stop values must be finite numbers")?;
+                *v = x.clamp(0.0, 1.0);
+            }
+            stops.push(stop);
+        }
+        Ok(Self::from_stops(stops))
+    }
+
+    /// A gradient from stops `[t, r, g, b]` (sorted here; order kept for equal t).
+    pub fn from_stops(mut stops: Vec<[f64; 4]>) -> Self {
+        stops.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        Self { stops }
+    }
+
+    pub fn stops(&self) -> &[[f64; 4]] {
+        &self.stops
+    }
+
+    /// Store as a JSON list of stops.
+    pub fn to_value(&self) -> ParamValue {
+        ParamValue::Other(serde_json::Value::Array(
+            self.stops.iter().map(|s| serde_json::json!(s)).collect(),
+        ))
+    }
+
+    /// The sRGB colour at `t`.
+    pub fn eval(&self, t: f64) -> [f32; 3] {
+        let s = &self.stops;
+        let last = s.len() - 1;
+        let rgb = |k: usize| [s[k][1] as f32, s[k][2] as f32, s[k][3] as f32];
+        if t <= s[0][0] {
+            return rgb(0);
+        }
+        if t >= s[last][0] {
+            return rgb(last);
+        }
+        let i = s.iter().rposition(|p| p[0] <= t).unwrap_or(0).min(last - 1);
+        let span = s[i + 1][0] - s[i][0];
+        let u = if span > 0.0 {
+            ((t - s[i][0]) / span) as f32
+        } else {
+            1.0
+        };
+        let (a, b) = (rgb(i), rgb(i + 1));
+        std::array::from_fn(|c| a[c] + (b[c] - a[c]) * u)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,5 +533,26 @@ mod tests {
         // The default is the identity.
         let id = Curve::parse(&def.default).unwrap();
         assert!((id.eval(0.3) - 0.3).abs() < 1e-12);
+    }
+
+    #[test]
+    fn gradient_validates_and_interpolates() {
+        let def = ParamDef::gradient("g", "Gradient", &[[0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 1.0]]);
+        let v: ParamValue = serde_json::from_str("[[1, 1, 0, 0], [0, 0, 0, 2], [0.5, 0, 1, 0]]").unwrap();
+        let stored = def.validate(&v).unwrap();
+        assert_eq!(
+            serde_json::to_string(&stored).unwrap(),
+            "[[0.0,0.0,0.0,1.0],[0.5,0.0,1.0,0.0],[1.0,1.0,0.0,0.0]]"
+        );
+        let g = Gradient::parse(&stored).unwrap();
+        assert_eq!(g.eval(-1.0), [0.0, 0.0, 1.0]);
+        assert_eq!(g.eval(0.25), [0.0, 0.5, 0.5]);
+        assert_eq!(g.eval(0.75), [0.5, 0.5, 0.0]);
+        assert_eq!(g.eval(2.0), [1.0, 0.0, 0.0]);
+        assert!(def.validate(&serde_json::from_str("[]").unwrap()).is_err());
+        assert!(
+            def.validate(&serde_json::from_str("[[0, 1, 1]]").unwrap())
+                .is_err()
+        );
     }
 }

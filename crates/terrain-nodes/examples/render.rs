@@ -77,15 +77,19 @@ fn main() {
     let value = out
         .get(&port)
         .unwrap_or_else(|| panic!("{node} has no output '{port}'"));
-    let (lo, hi) = value.grid().min_max();
-    println!("{node} at {res}²: {lo:.2} .. {hi:.2}  ({ms:.0} ms)");
-    let g = value.grid();
+    println!("{node} at {res}²  ({ms:.0} ms)");
     let rgb = match value.port_type() {
-        PortType::Heightfield => shade(g, project.world.height_range_m),
-        PortType::Mask => g
+        PortType::Heightfield => shade(value.grid(), project.world.height_range_m),
+        PortType::Mask => value
+            .grid()
             .data
             .iter()
             .flat_map(|&v| [(v.clamp(0.0, 1.0) * 255.0) as u8; 3])
+            .collect(),
+        PortType::ColorMap => value
+            .samples()
+            .chunks(4)
+            .flat_map(|px| [0, 1, 2].map(|c| (px[c].clamp(0.0, 1.0) * 255.0 + 0.5) as u8))
             .collect(),
     };
     image::RgbImage::from_raw(res, res, rgb)

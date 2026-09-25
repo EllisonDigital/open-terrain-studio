@@ -1,4 +1,5 @@
-//! Export writers: EXR 32-bit float, PNG 16-bit, and the `build.json` sidecar.
+//! Export writers: EXR 32-bit float, PNG 16 and 8-bit (grey, or RGBA for colour
+//! maps), and the `build.json` sidecar.
 //!
 //! Image orientation: row 0 of every exported image is world Y = 0 and column 0
 //! is world X = 0 (top-left of the image = world origin). Unreal, Godot and
@@ -10,7 +11,7 @@ use serde::Serialize;
 
 use crate::error::{CoreError, Result};
 use crate::eval::{EvalOptions, evaluate_node};
-use crate::grid::{Grid, GridSpec};
+use crate::grid::{ColorGrid, Grid, GridSpec};
 use crate::node::{NodeRegistry, PortType, Value};
 use crate::project::Project;
 use crate::world::World;
@@ -24,6 +25,9 @@ pub enum ExportFormat {
     /// Greyscale PNG, 16 bits. Heightfields are remapped: 0 = world min height,
     /// 65535 = world max height. Masks: 0..1 -> 0..65535.
     Png16,
+    /// Greyscale PNG, 8 bits, remapped like [`ExportFormat::Png16`] to 0..255.
+    /// For masks and colour maps engines load directly.
+    Png8,
 }
 
 impl ExportFormat {
@@ -31,6 +35,7 @@ impl ExportFormat {
         match s {
             "exr32" | "exr" => Some(Self::Exr32),
             "png16" | "png" => Some(Self::Png16),
+            "png8" => Some(Self::Png8),
             _ => None,
         }
     }
@@ -38,12 +43,16 @@ impl ExportFormat {
         match self {
             Self::Exr32 => "exr32",
             Self::Png16 => "png16",
+            Self::Png8 => "png8",
         }
     }
+    /// File name ending, e.g. .png; 8-bit PNGs end _8bit.png so they
+    /// don't overwrite a 16-bit PNG of the same output.
     pub fn extension(self) -> &'static str {
         match self {
             Self::Exr32 => "exr",
             Self::Png16 => "png",
+            Self::Png8 => "8bit.png",
         }
     }
 }
@@ -138,23 +147,41 @@ pub fn write_value(
     node: &str,
     port: &str,
 ) -> Result<ExportedFile> {
-    let grid = value.grid();
-    let (lo, hi) = grid.min_max();
+    let (lo, hi) = value
+        .samples()
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| {
+            (lo.min(v), hi.max(v))
+        });
     let ty = value.port_type();
     let encoding = match (format, ty) {
-        (ExportFormat::Exr32, PortType::Heightfield) => "metres".to_string(),
-        (ExportFormat::Exr32, PortType::Mask) => "0..1".to_string(),
-        (ExportFormat::Png16, PortType::Heightfield) => "0..65535 = height_range_m min..max".to_string(),
-        (ExportFormat::Png16, PortType::Mask) => "0..65535 = 0..1".to_string(),
-    };
-    match format {
-        ExportFormat::Exr32 => write_exr32(grid, path)?,
-        ExportFormat::Png16 => {
-            let normalised = match ty {
-                PortType::Heightfield => grid.map(|h| world.normalise(h)),
-                PortType::Mask => (**grid).clone(),
-            };
-            write_png16(&normalised, path)?
+        (ExportFormat::Exr32, PortType::Heightfield) => "metres",
+        (ExportFormat::Exr32, PortType::Mask) => "0..1",
+        (ExportFormat::Exr32, PortType::ColorMap) => "RGBA 0..1 as stored (sRGB for colours)",
+        (ExportFormat::Png16, PortType::Heightfield) => "0..65535 = height_range_m min..max",
+        (ExportFormat::Png16, PortType::Mask) => "0..65535 = 0..1",
+        (ExportFormat::Png16, PortType::ColorMap) => "RGBA, sRGB, 0..65535 = 0..1",
+        (ExportFormat::Png8, PortType::Heightfield) => "0..255 = height_range_m min..max",
+        (ExportFormat::Png8, PortType::Mask) => "0..255 = 0..1",
+        (ExportFormat::Png8, PortType::ColorMap) => "RGBA, sRGB, 0..255 = 0..1",
+    }
+    .to_string();
+    if let Some(color) = value.color() {
+        match format {
+            ExportFormat::Exr32 => write_exr32_rgba(color, path)?,
+            ExportFormat::Png16 => write_png_rgba(color, true, path)?,
+            ExportFormat::Png8 => write_png_rgba(color, false, path)?,
+        }
+    } else {
+        let grid = value.grid();
+        let normalised = || match ty {
+            PortType::Heightfield => grid.map(|h| world.normalise(h)),
+            _ => (**grid).clone(),
+        };
+        match format {
+            ExportFormat::Exr32 => write_exr32(grid, path)?,
+            ExportFormat::Png16 => write_png16(&normalised(), path)?,
+            ExportFormat::Png8 => write_png8(&normalised(), path)?,
         }
     }
     Ok(ExportedFile {
@@ -209,6 +236,79 @@ pub fn write_png16(normalised: &Grid, path: &Path) -> Result<()> {
     )
     .ok_or_else(|| CoreError::Image("pixel buffer size mismatch".into()))?;
     img.save_with_format(path, image::ImageFormat::Png)
+        .map_err(|e| CoreError::Image(e.to_string()))
+}
+
+/// Write an 8-bit greyscale PNG from 0..1 values (clamped).
+pub fn write_png8(normalised: &Grid, path: &Path) -> Result<()> {
+    let pixels: Vec<u8> = normalised
+        .data
+        .iter()
+        .map(|&v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8)
+        .collect();
+    let img = image::ImageBuffer::<image::Luma<u8>, _>::from_raw(
+        normalised.spec.width,
+        normalised.spec.height,
+        pixels,
+    )
+    .ok_or_else(|| CoreError::Image("pixel buffer size mismatch".into()))?;
+    img.save_with_format(path, image::ImageFormat::Png)
+        .map_err(|e| CoreError::Image(e.to_string()))
+}
+
+/// Write an RGBA PNG of a colour map, sRGB as stored: 16 bits if deep, else 8.
+pub fn write_png_rgba(color: &ColorGrid, deep: bool, path: &Path) -> Result<()> {
+    let (w, h) = (color.spec.width, color.spec.height);
+    let mismatch = || CoreError::Image("pixel buffer size mismatch".into());
+    let saved = if deep {
+        let px: Vec<u16> = color
+            .data
+            .iter()
+            .map(|&v| (v.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16)
+            .collect();
+        image::ImageBuffer::<image::Rgba<u16>, _>::from_raw(w, h, px)
+            .ok_or_else(mismatch)?
+            .save_with_format(path, image::ImageFormat::Png)
+    } else {
+        let px: Vec<u8> = color
+            .data
+            .iter()
+            .map(|&v| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8)
+            .collect();
+        image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(w, h, px)
+            .ok_or_else(mismatch)?
+            .save_with_format(path, image::ImageFormat::Png)
+    };
+    saved.map_err(|e| CoreError::Image(e.to_string()))
+}
+
+/// Write an RGBA 32-bit float EXR of a colour map, values as stored: colours
+/// stay sRGB-encoded, so packed weights and normal maps keep their exact values.
+pub fn write_exr32_rgba(color: &ColorGrid, path: &Path) -> Result<()> {
+    use exr::prelude::*;
+    let size = (color.spec.width as usize, color.spec.height as usize);
+    let channels: SmallVec<[AnyChannel<FlatSamples>; 4]> = ["R", "G", "B", "A"]
+        .iter()
+        .enumerate()
+        .map(|(c, name)| {
+            let data = color.data.chunks(4).map(|px| px[c]).collect();
+            AnyChannel::new(*name, FlatSamples::F32(data))
+        })
+        .collect();
+    let layer = Layer::new(
+        size,
+        LayerAttributes::named("colour"),
+        Encoding {
+            compression: Compression::ZIP16,
+            blocks: Blocks::ScanLines,
+            line_order: LineOrder::Increasing,
+        },
+        AnyChannels::sort(channels),
+    );
+    Image::from_layer(layer)
+        .write()
+        .non_parallel()
+        .to_file(path)
         .map_err(|e| CoreError::Image(e.to_string()))
 }
 
