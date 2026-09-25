@@ -9,8 +9,11 @@ pub mod basis;
 use std::sync::Arc;
 
 use terrain_core::error::Result;
-use terrain_core::{EvalContext, Grid, NodeKind, NodeSchema, Outputs, ParamDef, PortDef, PortType, Value};
+use terrain_core::{
+    EvalContext, Gpu, Grid, NodeKind, NodeSchema, Outputs, ParamDef, Params, PortDef, PortType, Value,
+};
 
+use crate::kernels;
 use basis::Basis;
 
 /// Parameters shared by every noise node.
@@ -54,6 +57,58 @@ fn noise_heightfield(ctx: &EvalContext, f: impl Fn(f64, f64) -> f64 + Sync) -> R
     )]))
 }
 
+/// The GPU version of [`noise_heightfield`]: `node` selects the function in
+/// `shaders/noise.comp`, `set` adds its parameters.
+fn noise_gpu(ctx: &EvalContext, gpu: &Gpu, node: u32, set: impl FnOnce(Params) -> Params) -> Result<Outputs> {
+    let s = ctx.spec;
+    let size = ctx.f64("feature_size_m");
+    let (ox, oy) = (ctx.f64("offset_x_m"), ctx.f64("offset_y_m"));
+    let height = gpu.field(ctx, "height_m")?;
+    let mask = gpu.field_buffer(&height)?;
+    let out = gpu.alloc(s.len())?;
+    // Lattice position = f[0] + f[1] × column (and likewise for rows), with
+    // the offsets folded in on the CPU in f64.
+    let lattice = |axis: usize, n: u32| {
+        (
+            ((s.origin_m[axis] + if axis == 0 { ox } else { oy }) / size) as f32,
+            (s.extent_m[axis] / (n - 1) as f64 / size) as f32,
+        )
+    };
+    let (ax, bx) = lattice(0, s.width);
+    let (ay, by) = lattice(1, s.height);
+    let p = Params::grid(s)
+        .u64(2, ctx.seed)
+        .u(4, node)
+        .u(8, height.driven())
+        .f(0, ax)
+        .f(1, bx)
+        .f(2, ay)
+        .f(3, by)
+        .f(4, height.value)
+        .f(5, ctx.f32("base_m"))
+        .f(10, height.min)
+        .f(11, height.max);
+    gpu.dispatch_grid(&kernels::NOISE, &[&out, &mask], &set(p), s)?;
+    Ok(Outputs::from([(
+        "out".to_string(),
+        gpu.value(PortType::Heightfield, s, out),
+    )]))
+}
+
+/// [`fractal_params`] for the GPU kernel.
+fn fractal_gpu(ctx: &EvalContext, p: Params) -> Params {
+    let (basis, octaves, lacunarity, gain) = fractal(ctx);
+    let basis = match basis {
+        Basis::Perlin => 0,
+        Basis::Simplex => 1,
+        Basis::Value => 2,
+    };
+    p.u(5, basis)
+        .u(6, octaves)
+        .f(6, lacunarity as f32)
+        .f(7, gain as f32)
+}
+
 fn schema(type_id: &str, label: &str, description: &str, mut params: Vec<ParamDef>) -> NodeSchema {
     let mut all = common_params();
     // Node-specific params go after feature size, before the generic ones.
@@ -69,7 +124,7 @@ fn schema(type_id: &str, label: &str, description: &str, mut params: Vec<ParamDe
         inputs: vec![],
         outputs: vec![PortDef::new("out", "Out", PortType::Heightfield)],
         params: all,
-        gpu: false,
+        gpu: true,
     }
 }
 
@@ -99,6 +154,9 @@ impl NodeKind for Perlin {
         let seed = ctx.seed;
         noise_heightfield(ctx, |x, y| basis::perlin(x, y, seed))
     }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        noise_gpu(ctx, gpu, 0, |p| p)
+    }
 }
 
 /// Single-layer simplex noise: like Perlin with fewer grid artefacts.
@@ -126,6 +184,9 @@ impl NodeKind for Simplex {
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let seed = ctx.seed;
         noise_heightfield(ctx, |x, y| basis::simplex(x, y, seed))
+    }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        noise_gpu(ctx, gpu, 1, |p| p)
     }
 }
 
@@ -185,6 +246,9 @@ impl NodeKind for Fbm {
             basis::fbm(basis, x, y, seed, octaves, lacunarity, gain)
         })
     }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        noise_gpu(ctx, gpu, 3, |p| fractal_gpu(ctx, p))
+    }
 }
 
 /// Single-layer value noise: soft, blobby hills.
@@ -212,6 +276,9 @@ impl NodeKind for ValueNoise {
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let seed = ctx.seed;
         noise_heightfield(ctx, |x, y| basis::value(x, y, seed))
+    }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        noise_gpu(ctx, gpu, 2, |p| p)
     }
 }
 
@@ -245,6 +312,9 @@ impl NodeKind for Ridged {
             basis::ridged(basis, x, y, seed, octaves, lacunarity, gain) * 2.0 - 1.0
         })
     }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        noise_gpu(ctx, gpu, 4, |p| fractal_gpu(ctx, p))
+    }
 }
 
 /// Billow noise: rounded, puffy hills with creased valleys.
@@ -275,6 +345,9 @@ impl NodeKind for Billow {
         noise_heightfield(ctx, |x, y| {
             basis::billow(basis, x, y, seed, octaves, lacunarity, gain)
         })
+    }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        noise_gpu(ctx, gpu, 5, |p| fractal_gpu(ctx, p))
     }
 }
 
@@ -313,6 +386,10 @@ impl NodeKind for DomainWarp {
         noise_heightfield(ctx, |x, y| {
             basis::warped_fbm(basis, x, y, seed, octaves, lacunarity, gain, warp)
         })
+    }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        let warp = (ctx.f64("warp_m") / ctx.f64("feature_size_m")) as f32;
+        noise_gpu(ctx, gpu, 6, |p| fractal_gpu(ctx, p).f(8, warp))
     }
 }
 
@@ -364,5 +441,14 @@ impl NodeKind for Voronoi {
             _ => |c| 2.0 * c.f1.min(1.0) - 1.0,
         };
         noise_heightfield(ctx, |x, y| f(basis::cellular(x, y, seed, jitter)))
+    }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        let mode = match ctx.choice("mode").as_str() {
+            "f1_inverted" => 1,
+            "f2_f1" => 2,
+            "cells" => 3,
+            _ => 0,
+        };
+        noise_gpu(ctx, gpu, 7, |p| p.u(7, mode).f(9, ctx.f32("jitter")))
     }
 }

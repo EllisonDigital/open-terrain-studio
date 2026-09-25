@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use terrain_core::error::Result;
-use terrain_core::{EvalContext, Grid, Outputs, ParamDef, Value};
+use terrain_core::{EvalContext, Grid, GridSpec, Outputs, ParamDef, Params, Value};
 
 /// A single `out` Heightfield output.
 pub fn heightfield_out(grid: Grid) -> Result<Outputs> {
@@ -78,4 +78,14 @@ pub fn strength_param() -> ParamDef {
     ParamDef::float("strength", "Strength", 1.0, 0.0, 1.0)
         .describe("How much of the effect to apply. 0 = input unchanged.")
         .drivable()
+}
+
+/// Kernel parameters `f[12..16]`: grid origin and cell size in metres, so a
+/// kernel can compute world positions (`origin + cell × index`).
+pub fn grid_positions(p: Params, spec: GridSpec) -> Params {
+    let cell = spec.cell_size_m();
+    p.f(12, spec.origin_m[0] as f32)
+        .f(13, cell[0] as f32)
+        .f(14, spec.origin_m[1] as f32)
+        .f(15, cell[1] as f32)
 }

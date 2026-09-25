@@ -4,9 +4,37 @@
 
 use terrain_core::error::Result;
 use terrain_core::ops::{gaussian_blur, gradient, slope_degrees, smoothstep, soft_range};
-use terrain_core::{EvalContext, Grid, NodeKind, NodeSchema, Outputs, ParamDef, PortDef, PortType};
+use terrain_core::{
+    EvalContext, Gpu, GpuBuffer, Grid, NodeKind, NodeSchema, Outputs, ParamDef, Params, PortDef, PortType,
+};
 
 use crate::common::{angle_param, direction, mask_out};
+use crate::kernels;
+
+/// Run `shaders/data.comp` in `mode`; `set` adds the mode's parameters.
+fn data_gpu(
+    ctx: &EvalContext,
+    gpu: &Gpu,
+    mode: u32,
+    aux: Option<&GpuBuffer>,
+    set: impl FnOnce(Params) -> Params,
+) -> Result<Outputs> {
+    let s = ctx.spec;
+    let input = gpu.input(ctx, "in")?;
+    let dummy = gpu.dummy()?;
+    let cell = s.cell_size_m();
+    let p = Params::grid(s)
+        .u(4, mode)
+        .u(5, ctx.bool("invert") as u32)
+        .f(3, cell[0] as f32)
+        .f(4, cell[1] as f32);
+    let out = gpu.alloc(s.len())?;
+    gpu.dispatch_grid(&kernels::DATA, &[&input, aux.unwrap_or(&dummy), &out], &set(p), s)?;
+    Ok(Outputs::from([(
+        "out".to_string(),
+        gpu.value(PortType::Mask, s, out),
+    )]))
+}
 
 fn data_schema(
     type_id: &str,
@@ -27,6 +55,12 @@ fn data_schema(
         params,
         gpu: false,
     }
+}
+
+/// A schema with a GPU kernel.
+fn with_gpu(mut schema: NodeSchema) -> NodeSchema {
+    schema.gpu = true;
+    schema
 }
 
 /// Apply the shared "invert" parameter and output the mask.
@@ -86,7 +120,7 @@ pub struct Slope {
 impl Default for Slope {
     fn default() -> Self {
         Self {
-            schema: data_schema(
+            schema: with_gpu(data_schema(
                 "data.slope",
                 "Slope",
                 "White where the ground is as steep as Min to Max degrees (0° = flat, 90° = vertical).",
@@ -98,7 +132,7 @@ impl Default for Slope {
                         .unit("°")
                         .describe("Angle over which the mask fades out."),
                 ],
-            ),
+            )),
         }
     }
 }
@@ -113,6 +147,13 @@ impl NodeKind for Slope {
         let slope = slope_degrees(input);
         finish(ctx, slope.map(|s| soft_range(s, lo, hi, f)))
     }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        data_gpu(ctx, gpu, 0, None, |p| {
+            p.f(0, ctx.f32("min_deg"))
+                .f(1, ctx.f32("max_deg"))
+                .f(2, ctx.f32("falloff_deg"))
+        })
+    }
 }
 
 // ---- Curvature --------------------------------------------------------------
@@ -125,7 +166,7 @@ pub struct Curvature {
 impl Default for Curvature {
     fn default() -> Self {
         Self {
-            schema: data_schema(
+            schema: with_gpu(data_schema(
                 "data.curvature",
                 "Curvature",
                 "Finds ridges and peaks (convex) or valleys and hollows (concave), by comparing each \
@@ -148,7 +189,7 @@ impl Default for Curvature {
                         "Height above (or below) the surroundings that gives full white, in metres.",
                     ),
                 ],
-            ),
+            )),
         }
     }
 }
@@ -174,6 +215,18 @@ impl NodeKind for Curvature {
             }),
         )
     }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        let input = gpu.input(ctx, "in")?;
+        let blurred = gpu.gaussian_blur(ctx.spec, &input, ctx.f64("radius_m") * 0.5)?;
+        let show = match ctx.choice("mode").as_str() {
+            "concave" => 1,
+            "both" => 2,
+            _ => 0,
+        };
+        data_gpu(ctx, gpu, 2, Some(&blurred), |p| {
+            p.u(6, show).f(0, ctx.f32("range_m"))
+        })
+    }
 }
 
 // ---- Aspect -----------------------------------------------------------------
@@ -186,7 +239,7 @@ pub struct Aspect {
 impl Default for Aspect {
     fn default() -> Self {
         Self {
-            schema: data_schema(
+            schema: with_gpu(data_schema(
                 "data.aspect",
                 "Aspect",
                 "White on slopes facing the chosen direction (e.g. sunny or shaded sides), black on \
@@ -205,7 +258,7 @@ impl Default for Aspect {
                         .unit("°")
                         .describe("Ground flatter than this fades to black."),
                 ],
-            ),
+            )),
         }
     }
 }
@@ -243,6 +296,15 @@ impl NodeKind for Aspect {
                 data,
             },
         )
+    }
+    fn evaluate_gpu(&self, ctx: &EvalContext, gpu: &Gpu) -> Result<Outputs> {
+        let (fx, fy) = direction(ctx.f64("direction_deg"));
+        data_gpu(ctx, gpu, 1, None, |p| {
+            p.f(0, fx as f32)
+                .f(1, fy as f32)
+                .f(2, ctx.f32("sharpness"))
+                .f(5, ctx.f32("min_slope_deg"))
+        })
     }
 }
 

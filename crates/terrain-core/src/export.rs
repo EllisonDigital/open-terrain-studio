@@ -74,6 +74,9 @@ pub struct BuildInfo {
     pub cell_size_m: [f64; 2],
     pub seed: u64,
     pub orientation: String,
+    /// "cpu" (bit-exact on every machine) or "gpu: <device>" (matches the
+    /// CPU within tolerance).
+    pub compute: String,
     pub files: Vec<ExportedFile>,
     pub unreal: UnrealHints,
 }
@@ -119,6 +122,7 @@ impl BuildInfo {
             cell_size_m: cell,
             seed: world.seed,
             orientation: "row 0 = world Y 0, column 0 = world X 0".into(),
+            compute: "cpu".into(),
             files,
             unreal: UnrealHints::new(world, cell[0]),
         }
@@ -360,7 +364,10 @@ fn write_outputs(
             written.push(path);
         }
     }
-    let info = BuildInfo::new(&project.world, &spec, files);
+    let mut info = BuildInfo::new(&project.world, &spec, files);
+    if let Some(gpu) = opts.gpu {
+        info.compute = format!("gpu: {}", gpu.name());
+    }
     let info_path = folder.join("build.json");
     std::fs::write(&info_path, serde_json::to_string_pretty(&info)? + "\n")?;
     written.push(info_path);

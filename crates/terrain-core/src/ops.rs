@@ -60,12 +60,8 @@ fn blur_rows(data: &mut [f32], w: usize, sigma: f64) {
     }
     if sigma <= 6.0 {
         // Exact separable kernel.
-        let r = (sigma * 3.0).ceil() as i64;
-        let mut kernel: Vec<f64> = (-r..=r)
-            .map(|x| libm::exp(-((x * x) as f64) / (2.0 * sigma * sigma)))
-            .collect();
-        let sum: f64 = kernel.iter().sum();
-        kernel.iter_mut().for_each(|k| *k /= sum);
+        let (r, kernel) = gaussian_kernel(sigma);
+        let r = r as i64;
         data.par_chunks_mut(w).for_each(|row| {
             let src = row.to_vec();
             let last = w as i64 - 1;
@@ -92,8 +88,20 @@ fn blur_rows(data: &mut [f32], w: usize, sigma: f64) {
     }
 }
 
+/// Radius (cells) and normalised weights (`2r + 1` of them) of the exact
+/// Gaussian kernel used for `sigma <= 6` cells.
+pub(crate) fn gaussian_kernel(sigma: f64) -> (usize, Vec<f64>) {
+    let r = (sigma * 3.0).ceil() as i64;
+    let mut kernel: Vec<f64> = (-r..=r)
+        .map(|x| libm::exp(-((x * x) as f64) / (2.0 * sigma * sigma)))
+        .collect();
+    let sum: f64 = kernel.iter().sum();
+    kernel.iter_mut().for_each(|k| *k /= sum);
+    (r as usize, kernel)
+}
+
 /// Widths of `n` box filters whose combination approximates a Gaussian.
-fn box_sizes(sigma: f64, n: usize) -> Vec<usize> {
+pub(crate) fn box_sizes(sigma: f64, n: usize) -> Vec<usize> {
     let nf = n as f64;
     let ideal = (12.0 * sigma * sigma / nf + 1.0).sqrt();
     let mut wl = ideal.floor() as i64;

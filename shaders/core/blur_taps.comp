@@ -1,0 +1,21 @@
+// Gaussian blur along one axis with explicit weights (sigma <= 6 cells), edges
+// repeated. u[2] = axis (0 = along x, 1 = along y), u[3] = radius in cells.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0, std430) readonly buffer Src { float src[]; };
+layout(set = 0, binding = 1, std430) writeonly buffer Dst { float dst[]; };
+layout(set = 0, binding = 2, std430) readonly buffer Weights { float weights[]; };
+
+void main() {
+    uvec2 g = gl_GlobalInvocationID.xy;
+    if (g.x >= WIDTH || g.y >= HEIGHT) {
+        return;
+    }
+    int r = int(pc.u[3]);
+    ivec2 step = pc.u[2] == 0u ? ivec2(1, 0) : ivec2(0, 1);
+    float acc = 0.0;
+    for (int k = -r; k <= r; k++) {
+        ivec2 p = ivec2(g) + step * k;
+        acc += src[cell_clamped(p.x, p.y)] * weights[k + r];
+    }
+    dst[cell(g.x, g.y)] = acc;
+}

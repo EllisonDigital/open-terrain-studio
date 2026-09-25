@@ -13,6 +13,7 @@ const BuildPanel := preload("res://scripts/build_panel.gd")
 
 const PREVIEW_RESOLUTIONS := [256, 512, 1024, 2048]
 const EXPORT_RESOLUTIONS := [512, 1009, 1024, 2017, 2048, 4033, 4096, 8129, 8192]
+const SETTINGS_PATH := "user://settings.cfg"
 const REPO_URL := "https://gitlab.com/ellison-digital/open-terrain-studio/open-terrain-studio"
 ## Example projects bundled with the app, built only from built-in nodes.
 const EXAMPLES := [
@@ -20,9 +21,11 @@ const EXAMPLES := [
 	["Canyon", "res://examples/canyon.otstudio"],
 	["Dune field", "res://examples/dune_field.otstudio"],
 	["Eroded strata", "res://examples/eroded_strata.otstudio"],
+	["Asterfall Crown — Hero World", "res://examples/asterfall_crown.otstudio"],
 ]
 
-enum Menu { NEW, OPEN, SAVE, SAVE_AS, EXPORT, QUIT, WORLD, DOCS, ABOUT, UNDO, REDO, MARK_EXPORT, BUILD, EXAMPLE = 100 }
+enum Menu { NEW, OPEN, SAVE, SAVE_AS, EXPORT, QUIT, WORLD, DOCS, ABOUT, UNDO, REDO, MARK_EXPORT, BUILD,
+		AUTO_UPDATE, UPDATE_PREVIEW, FORCE_CPU, EXAMPLE = 100 }
 
 var project: TerrainProject
 var graph: TerrainGraph
@@ -43,6 +46,10 @@ var viewed_id := ""
 var viewed_port := ""
 var preview_resolution := 512
 var view_2d := false
+## Recompute the preview after every edit; off = only on Update (F5).
+var auto_update := true
+## Machine settings (not saved in projects): user://settings.cfg.
+var settings := ConfigFile.new()
 
 var _status_label: Label
 var _stats_label: Label
@@ -63,10 +70,17 @@ var _view_switch: OptionButton
 var _output_label: Label
 var _output_picker: OptionButton
 var _last_preview: TerrainPreview
+var _settings_menu: PopupMenu
+var _update_button: Button
+var _res_picker: OptionButton
+var _preview_stale := false
+var _gpu_label: Label
+var _gpu_state := ""
 
 
 func _ready() -> void:
 	get_tree().set_auto_accept_quit(false)
+	_load_settings()
 	project = TerrainProject.new()
 	graph = project.get_graph()
 
@@ -84,6 +98,7 @@ func _ready() -> void:
 	_build_ui()
 	_build_dialogs()
 	_new_project_with_starter_graph()
+	_poll_gpu_status()
 
 
 # ---- layout ---------------------------------------------------------------
@@ -134,6 +149,17 @@ func _build_ui() -> void:
 	project_menu.add_item("World Settings", Menu.WORLD)
 	project_menu.id_pressed.connect(_on_menu)
 	menubar.add_child(project_menu)
+	_settings_menu = PopupMenu.new()
+	_settings_menu.name = "Settings"
+	_settings_menu.add_check_item("Auto-update Preview", Menu.AUTO_UPDATE)
+	_settings_menu.add_item("Update Preview", Menu.UPDATE_PREVIEW, KEY_F5)
+	_settings_menu.add_separator()
+	_settings_menu.add_check_item("Force CPU (debugging)", Menu.FORCE_CPU)
+	_settings_menu.set_item_tooltip(_settings_menu.get_item_index(Menu.FORCE_CPU),
+			"Compute every node on the CPU even when a GPU is available.")
+	_settings_menu.id_pressed.connect(_on_menu)
+	_settings_menu.about_to_popup.connect(_update_settings_menu)
+	menubar.add_child(_settings_menu)
 	var help_menu := PopupMenu.new()
 	help_menu.name = "Help"
 	help_menu.add_item("Documentation", Menu.DOCS)
@@ -192,6 +218,11 @@ func _build_ui() -> void:
 	build_panel = BuildPanel.new()
 	build_panel.name = "Build"
 	build_panel.project = project
+	build_panel.builds_on_gpu = settings.get_value("compute", "builds_on_gpu", false)
+	build_panel.builds_on_gpu_toggled.connect(func(on):
+		settings.set_value("compute", "builds_on_gpu", on)
+		_save_settings()
+		TerrainBuilder.set_builds_on_gpu(on))
 	build_panel.build_requested.connect(_start_build)
 	build_panel.export_toggled.connect(_on_export_toggled)
 	build_panel.view_requested.connect(func(id):
@@ -210,6 +241,10 @@ func _build_ui() -> void:
 	_stats_label = Label.new()
 	_stats_label.modulate = Color(1, 1, 1, 0.7)
 	sb.add_child(_stats_label)
+	_gpu_label = Label.new()
+	_gpu_label.modulate = Color(1, 1, 1, 0.7)
+	_gpu_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	sb.add_child(_gpu_label)
 	_progress = ProgressBar.new()
 	_progress.custom_minimum_size = Vector2(180, 0)
 	_progress.show_percentage = false
@@ -249,6 +284,14 @@ func _build_view_toolbar() -> Control:
 		preview_resolution = PREVIEW_RESOLUTIONS[i]
 		_request_preview())
 	bar.add_child(res)
+	_res_picker = res
+
+	_update_button = Button.new()
+	_update_button.text = "Update (F5)"
+	_update_button.tooltip_text = "Recompute the preview. Auto-update is off (Settings menu)."
+	_update_button.pressed.connect(_request_preview)
+	_update_button.visible = not auto_update
+	bar.add_child(_update_button)
 
 	bar.add_child(_label("View"))
 	var mode := OptionButton.new()
@@ -431,6 +474,7 @@ func _restore_ui_state() -> void:
 	viewed_port = state.get("viewed_port", "")
 	if state.has("preview_resolution") and int(state["preview_resolution"]) in PREVIEW_RESOLUTIONS:
 		preview_resolution = int(state["preview_resolution"])
+		_res_picker.select(PREVIEW_RESOLUTIONS.find(preview_resolution))
 	_after_project_loaded(viewed)
 	view.set_camera_state(state.get("camera", {}))
 	_set_view_2d(state.get("view_2d", false))
@@ -550,7 +594,22 @@ func _show_inspector_for(id: String) -> void:
 	inspector.show_world()
 
 
+## The terrain changed: update the preview now, or mark it out of date when
+## auto-update is off.
+func _terrain_edited() -> void:
+	if auto_update:
+		_request_preview()
+	else:
+		_preview_stale = true
+		_update_button.modulate = Color(1.0, 0.85, 0.4)
+		_update_button.tooltip_text = "The preview is out of date. Recompute it (F5)."
+
+
 func _request_preview() -> void:
+	_preview_stale = false
+	if _update_button != null:
+		_update_button.modulate = Color.WHITE
+		_update_button.tooltip_text = "Recompute the preview. Auto-update is off (Settings menu)."
 	if viewed_id == "" or not graph.has_node(viewed_id):
 		builder.cancel()
 		view.clear()
@@ -586,7 +645,7 @@ func _on_graph_edited() -> void:
 	if viewed_id != "" and not graph.has_node(viewed_id):
 		viewed_id = ""
 	build_panel.refresh()
-	_request_preview()
+	_terrain_edited()
 
 
 func _on_param_changed(node_id: String, key: String, value: Variant) -> void:
@@ -597,7 +656,7 @@ func _on_param_changed(node_id: String, key: String, value: Variant) -> void:
 	if typeof(stored) != TYPE_ARRAY and stored != value:
 		inspector.refresh_value(key, stored)
 	_update_title()
-	_request_preview()
+	_terrain_edited()
 
 
 func _on_port_toggled(node_id: String, key: String, exposed: bool) -> void:
@@ -623,7 +682,7 @@ func _on_export_toggled(node_id: String, port: String, format: String, on: bool)
 func _on_world_changed() -> void:
 	_apply_world()
 	_update_title()
-	_request_preview()
+	_terrain_edited()
 
 
 # ---- undo / redo ------------------------------------------------------------
@@ -647,7 +706,7 @@ func _undo_redo(redo: bool) -> void:
 		inspector.show_world()
 	build_panel.refresh()
 	_update_title()
-	_request_preview()
+	_terrain_edited()
 	_set_status("%s: %s" % ["Redo" if redo else "Undo", label])
 
 
@@ -696,6 +755,7 @@ func _on_preview_ready(preview: TerrainPreview) -> void:
 		preview.get_resolution(), span_text,
 		"from cache" if n == 0 else "%d node%s computed" % [n, "" if n == 1 else "s"],
 		preview.get_millis()]
+	_update_gpu_label()
 	_set_status("")
 
 
@@ -808,6 +868,25 @@ func _on_menu(id: int) -> void:
 		Menu.WORLD:
 			graph_panel.select_node("")
 			inspector.show_world()
+		Menu.AUTO_UPDATE:
+			auto_update = not auto_update
+			settings.set_value("preview", "auto_update", auto_update)
+			_save_settings()
+			_update_button.visible = not auto_update
+			if auto_update and _preview_stale:
+				_request_preview()
+		Menu.UPDATE_PREVIEW:
+			_request_preview()
+		Menu.FORCE_CPU:
+			var on := not bool(settings.get_value("compute", "force_cpu", false))
+			settings.set_value("compute", "force_cpu", on)
+			_save_settings()
+			TerrainBuilder.set_force_cpu(on)
+			_update_gpu_label()
+			graph_panel.gpu_active = _gpu_state == "ready" and not on
+			graph_panel.rebuild()
+			_request_preview()
+			_set_status("Computing on the CPU only." if on else "Computing on the GPU where nodes support it.")
 		Menu.DOCS:
 			OS.shell_open(REPO_URL)
 		Menu.ABOUT:
@@ -834,3 +913,55 @@ func _show_message(title: String, text: String) -> void:
 	_message.title = title
 	_message.dialog_text = text
 	_message.popup_centered()
+
+
+# ---- settings and GPU status ------------------------------------------------
+
+func _load_settings() -> void:
+	settings.load(SETTINGS_PATH)
+	auto_update = settings.get_value("preview", "auto_update", true)
+	TerrainBuilder.set_force_cpu(settings.get_value("compute", "force_cpu", false))
+	TerrainBuilder.set_builds_on_gpu(settings.get_value("compute", "builds_on_gpu", false))
+
+
+func _save_settings() -> void:
+	settings.save(SETTINGS_PATH)
+
+
+func _update_settings_menu() -> void:
+	_settings_menu.set_item_checked(_settings_menu.get_item_index(Menu.AUTO_UPDATE), auto_update)
+	_settings_menu.set_item_checked(_settings_menu.get_item_index(Menu.FORCE_CPU),
+			settings.get_value("compute", "force_cpu", false))
+	_settings_menu.set_item_disabled(_settings_menu.get_item_index(Menu.FORCE_CPU), _gpu_state != "ready")
+
+
+## The GPU starts in the background: check until it is ready (or known missing).
+func _poll_gpu_status() -> void:
+	while _update_gpu_label() == "starting":
+		await get_tree().create_timer(0.25).timeout
+	graph_panel.gpu_active = _gpu_state == "ready" and not settings.get_value("compute", "force_cpu", false)
+	graph_panel.rebuild()
+
+
+## Show the compute device in the status bar; returns its state.
+func _update_gpu_label() -> String:
+	var s: Dictionary = TerrainBuilder.get_gpu_status()
+	_gpu_state = s["state"]
+	match _gpu_state:
+		"starting":
+			_gpu_label.text = "  ·  GPU starting…"
+			_gpu_label.tooltip_text = ""
+		"unavailable":
+			_gpu_label.text = "  ·  CPU only"
+			_gpu_label.tooltip_text = "No GPU compute: %s.\nEvery node runs on the CPU, with the same results." % s.get("reason", "")
+		_:
+			if s["force_cpu"]:
+				_gpu_label.text = "  ·  CPU (forced)"
+			else:
+				_gpu_label.text = "  ·  GPU"
+			var tip := "GPU: %s\nNodes marked GPU in the graph run there; the rest on the CPU." % s["name"]
+			if int(s["fallbacks"]) > 0:
+				_gpu_label.text += " ⚠"
+				tip += "\n%d GPU run(s) failed and used the CPU. Last error: %s" % [s["fallbacks"], s["last_error"]]
+			_gpu_label.tooltip_text = tip
+	return _gpu_state

@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::Serialize;
 
 use crate::error::{CoreError, Result};
+use crate::gpu::{Gpu, GpuGrid};
 use crate::grid::{Grid, GridSpec};
 use crate::params::{Curve, ParamDef, ParamKind, ParamValue};
 use crate::world::World;
@@ -39,6 +40,8 @@ impl PortType {
 pub enum Value {
     Heightfield(Arc<Grid>),
     Mask(Arc<Grid>),
+    /// A result still on the GPU; read back on first [`Value::grid`].
+    Gpu(PortType, Arc<GpuGrid>),
 }
 
 impl Value {
@@ -46,16 +49,28 @@ impl Value {
         match self {
             Value::Heightfield(_) => PortType::Heightfield,
             Value::Mask(_) => PortType::Mask,
+            Value::Gpu(ty, _) => *ty,
         }
     }
 
+    /// The data on the CPU (a GPU result is downloaded the first time).
     pub fn grid(&self) -> &Arc<Grid> {
         match self {
             Value::Heightfield(g) | Value::Mask(g) => g,
+            Value::Gpu(_, g) => g.cpu(),
         }
     }
 
-    /// Convert to another port type using the world height range.
+    /// Resolution and world region, without reading GPU data back.
+    pub fn spec(&self) -> GridSpec {
+        match self {
+            Value::Heightfield(g) | Value::Mask(g) => g.spec,
+            Value::Gpu(_, g) => g.spec,
+        }
+    }
+
+    /// Convert to another port type using the world height range. A GPU
+    /// value is converted on the GPU (or, if that fails, on the CPU).
     pub fn convert(&self, to: PortType, world: &World) -> Value {
         match (self, to) {
             (Value::Heightfield(g), PortType::Heightfield) => Value::Heightfield(g.clone()),
@@ -63,6 +78,26 @@ impl Value {
             (Value::Heightfield(g), PortType::Mask) => Value::Mask(Arc::new(g.map(|h| world.normalise(h)))),
             (Value::Mask(g), PortType::Heightfield) => {
                 Value::Heightfield(Arc::new(g.map(|m| world.denormalise(m))))
+            }
+            (Value::Gpu(from, _), to) if *from == to => self.clone(),
+            (Value::Gpu(from, g), to) => {
+                let span = world.height_span();
+                let min = world.height_range_m[0];
+                let (scale, offset) = match to {
+                    PortType::Mask => (1.0 / span, -min / span),
+                    PortType::Heightfield => (span, min),
+                };
+                let gpu = Gpu::new(g.buffer.device().clone());
+                match gpu.affine(g.spec, &g.buffer, scale, offset) {
+                    Ok(buffer) => gpu.value(to, g.spec, buffer),
+                    Err(_) => {
+                        let cpu = match from {
+                            PortType::Heightfield => Value::Heightfield(g.cpu().clone()),
+                            PortType::Mask => Value::Mask(g.cpu().clone()),
+                        };
+                        cpu.convert(to, world)
+                    }
+                }
             }
         }
     }
@@ -131,7 +166,7 @@ pub struct NodeSchema {
     pub inputs: Vec<PortDef>,
     pub outputs: Vec<PortDef>,
     pub params: Vec<ParamDef>,
-    /// Whether a GPU kernel exists (v0.4+). Always false in v0.1.
+    /// Whether a GPU kernel exists ([`NodeKind::evaluate_gpu`]).
     pub gpu: bool,
 }
 
@@ -169,6 +204,14 @@ pub trait NodeKind: Send + Sync + 'static {
 
     /// Compute every output. Must be deterministic: same context in, same bits out.
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs>;
+
+    /// Compute every output on the GPU, for nodes whose schema sets `gpu`.
+    /// Must match [`NodeKind::evaluate`] within the node's GPU tolerance.
+    /// Return [`CoreError::GpuUnsupported`] for settings the kernel doesn't
+    /// cover; the evaluator then uses the CPU, as it does for any other error.
+    fn evaluate_gpu(&self, _ctx: &EvalContext, _gpu: &Gpu) -> Result<Outputs> {
+        Err(CoreError::GpuUnsupported)
+    }
 
     /// Upgrade parameters saved by an older `type_version`. Default: no change.
     fn migrate(&self, _from_version: u32, _params: &mut BTreeMap<String, ParamValue>) -> Result<()> {
@@ -320,10 +363,7 @@ impl<'a> EvalContext<'a> {
         let value = self.f32(key);
         match self.inputs.get(&param_port_key(key)) {
             Some(v) => {
-                let (min, max) = match self.schema.param(key).map(|d| &d.kind) {
-                    Some(ParamKind::Float { min, max, .. }) => (*min as f32, *max as f32),
-                    _ => (f32::MIN, f32::MAX),
-                };
+                let (min, max) = self.param_range(key);
                 Field::Driven {
                     value,
                     min,
@@ -332,6 +372,14 @@ impl<'a> EvalContext<'a> {
                 }
             }
             None => Field::Const(value),
+        }
+    }
+
+    /// The range a driven float parameter is clamped to.
+    pub(crate) fn param_range(&self, key: &str) -> (f32, f32) {
+        match self.schema.param(key).map(|d| &d.kind) {
+            Some(ParamKind::Float { min, max, .. }) => (*min as f32, *max as f32),
+            _ => (f32::MIN, f32::MAX),
         }
     }
 

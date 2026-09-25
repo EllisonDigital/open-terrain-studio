@@ -4,9 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use terrain_core::{
-    EvalOptions, Grid, GridSpec, NodeRegistry, ParamValue, PortType, Project, Value, evaluate_node,
-};
+use terrain_core::{EvalOptions, Grid, GridSpec, NodeRegistry, ParamValue, PortType, Project, evaluate_node};
 
 pub fn registry() -> NodeRegistry {
     terrain_nodes::registry()
@@ -97,10 +95,8 @@ pub fn eval_with(
     let spec = GridSpec::full_world(&p.world, res).unwrap();
     let out =
         evaluate_node(&p.graph, reg, &p.world, spec, node, opts).unwrap_or_else(|e| panic!("{node}: {e}"));
-    match out.values().next().unwrap() {
-        Value::Heightfield(g) => (g.clone(), PortType::Heightfield),
-        Value::Mask(g) => (g.clone(), PortType::Mask),
-    }
+    let v = out.values().next().unwrap();
+    (v.grid().clone(), v.port_type())
 }
 
 /// Bits of every sample, for exact comparisons.

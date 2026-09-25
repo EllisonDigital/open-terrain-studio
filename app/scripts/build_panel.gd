@@ -6,12 +6,15 @@ extends ScrollContainer
 signal build_requested(resolution: int, folder: String)
 signal view_requested(node_id: String)
 signal export_toggled(node_id: String, port: String, format: String, on: bool)
+signal builds_on_gpu_toggled(on: bool)
 
 const RESOLUTIONS := [512, 1009, 1024, 2017, 2048, 4033, 4096, 8129, 8192]
 const UNREAL_SIZES := [1009, 2017, 4033, 8129]
 const FORMATS := [["exr32", "EXR"], ["png16", "PNG 16"]]
 
 var project: TerrainProject
+## Compute builds on the GPU (a machine setting, owned by the main window).
+var builds_on_gpu := false
 var busy := false:
 	set(v):
 		busy = v
@@ -82,6 +85,15 @@ func _ready() -> void:
 		_folder.text = dir
 		project.set_build_folder(dir))
 	add_child(_folder_dialog)
+
+	var gpu := CheckBox.new()
+	gpu.text = "Compute on the GPU"
+	gpu.button_pressed = builds_on_gpu
+	gpu.tooltip_text = "Faster. Results match the CPU within 0.01% of the value range but are not\nbit-identical, and can differ slightly between GPUs. Off = identical files on every machine."
+	gpu.toggled.connect(func(on):
+		builds_on_gpu = on
+		builds_on_gpu_toggled.emit(on))
+	_box.add_child(gpu)
 
 	_box.add_child(HSeparator.new())
 	_summary = _label("")

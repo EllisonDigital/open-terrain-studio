@@ -73,6 +73,13 @@ To see a node without starting the app, render it to a shaded PNG:
 cargo run --release -p terrain-nodes --example render -- terrain.mountain mountain.png 1025
 ```
 
+To give a node a GPU version, see *Adding a kernel* in [docs/gpu.md](docs/gpu.md); the GPU test then
+checks it against the CPU automatically:
+
+```sh
+cargo build && godot --path app --rendering-driver vulkan --script res://tests/gpu_test.gd
+```
+
 If you later change what a parameter means, bump `type_version` and implement `NodeKind::migrate` so old
 projects still open correctly. If you change a node's output on purpose, re-bless the golden hashes and say
 why in the merge request: it changes existing users' terrains.

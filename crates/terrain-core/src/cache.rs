@@ -100,7 +100,8 @@ impl EvalCache {
     /// recently used entries if over budget. Results bigger than the whole
     /// budget are not stored.
     pub fn insert(&self, key: CacheKey, outputs: &Outputs) {
-        let bytes: usize = outputs.values().map(|v| v.grid().data.len() * 4).sum();
+        // GPU results count too (without reading them back): they hold device memory.
+        let bytes: usize = outputs.values().map(|v| v.spec().len() * 4).sum();
         let mut inner = self.lock();
         inner.stats.misses += 1;
         if bytes > inner.budget {

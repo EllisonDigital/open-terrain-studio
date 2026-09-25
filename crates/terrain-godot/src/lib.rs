@@ -12,6 +12,10 @@
 //! | `TerrainPreview`  | RefCounted | one evaluated result, as a Godot `Image`         |
 //! | `TerrainExporter` | Node       | exports / builds EXR/PNG + build.json on a worker |
 //!
+//! Nodes with a GPU kernel run on a RenderingDevice owned by one thread
+//! ([`gpu`]); without one (Compatibility renderer, headless) everything runs on
+//! the CPU.
+//!
 //! Preview and build jobs share one [`cache`], so viewing a node after editing
 //! a downstream one, or building outputs that share upstream nodes, reuses
 //! earlier results.
@@ -19,6 +23,7 @@
 mod builder;
 mod convert;
 mod exporter;
+mod gpu;
 mod graph;
 mod jobs;
 mod preview;
@@ -32,7 +37,14 @@ use terrain_core::{EvalCache, NodeRegistry};
 struct OpenTerrainStudio;
 
 #[gdextension]
-unsafe impl ExtensionLibrary for OpenTerrainStudio {}
+unsafe impl ExtensionLibrary for OpenTerrainStudio {
+    fn on_stage_deinit(stage: InitStage) {
+        // Free GPU resources while the RenderingServer still exists.
+        if stage == InitStage::MainLoop {
+            gpu::shutdown();
+        }
+    }
+}
 
 /// The node registry, built once.
 pub(crate) fn registry() -> &'static NodeRegistry {

@@ -1,0 +1,62 @@
+// Data masks (crates/terrain-nodes/src/data.rs): Slope, Aspect and the
+// per-cell part of Curvature (the blur is shaders/core/blur_*.comp).
+//
+// Bindings: 0 input heights, 1 auxiliary (blurred heights), 2 output mask.
+// u[4] mode: 0 slope, 1 aspect, 2 curvature   u[5] invert   u[6] curvature show
+//      (0 convex, 1 concave, 2 both)
+// Slope:     f[0] min, f[1] max, f[2] falloff (degrees)
+// Aspect:    f[0], f[1] facing direction, f[2] sharpness, f[5] min slope (degrees)
+// Curvature: f[0] sensitivity (m)
+// f[3], f[4] cell size x, y (metres)
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0, std430) readonly buffer Src { float src[]; };
+layout(set = 0, binding = 1, std430) readonly buffer Aux { float aux[]; };
+layout(set = 0, binding = 2, std430) writeonly buffer Out { float result[]; };
+
+const float TO_DEGREES = 57.29577951;
+
+// Central differences, one-sided at the edges (terrain_core::ops::gradient).
+vec2 gradient(ivec2 p) {
+    int w = int(WIDTH);
+    int h = int(HEIGHT);
+    int i0 = max(p.x - 1, 0);
+    int i1 = min(p.x + 1, w - 1);
+    int j0 = max(p.y - 1, 0);
+    int j1 = min(p.y + 1, h - 1);
+    float gx = (src[cell_clamped(i1, p.y)] - src[cell_clamped(i0, p.y)]) / (float(max(i1 - i0, 1)) * pc.f[3]);
+    float gy = (src[cell_clamped(p.x, j1)] - src[cell_clamped(p.x, j0)]) / (float(max(j1 - j0, 1)) * pc.f[4]);
+    return vec2(gx, gy);
+}
+
+void main() {
+    uvec2 g = gl_GlobalInvocationID.xy;
+    if (g.x >= WIDTH || g.y >= HEIGHT) {
+        return;
+    }
+    uint k = cell(g.x, g.y);
+    uint mode = pc.u[4];
+    float v;
+    if (mode == 0u) {
+        float slope = atan_precise(length(gradient(ivec2(g)))) * TO_DEGREES;
+        v = soft_range(slope, pc.f[0], pc.f[1], pc.f[2]);
+    } else if (mode == 1u) {
+        vec2 grad = gradient(ivec2(g));
+        float len = length(grad);
+        if (len <= 0.0) {
+            v = 0.0;
+        } else {
+            // A slope faces downhill: along -gradient.
+            float facing = dot(-grad, vec2(pc.f[0], pc.f[1])) / len;
+            float slope = atan_precise(len) * TO_DEGREES;
+            v = pow(max(0.5 + 0.5 * facing, 0.0), pc.f[2]) * smoothstep_any(0.0, pc.f[5], slope);
+        }
+    } else {
+        float c = (src[k] - aux[k]) / pc.f[0];
+        uint show = pc.u[6];
+        v = show == 1u ? -c : (show == 2u ? 0.5 + 0.5 * c : c);
+    }
+    if (pc.u[5] != 0u) {
+        v = 1.0 - clamp(v, 0.0, 1.0);
+    }
+    result[k] = clamp(v, 0.0, 1.0);
+}

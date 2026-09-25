@@ -134,6 +134,25 @@ godot-smoke-min:
     - $GODOT --headless --path app --script res://tests/smoke_test.gd
     - $GODOT --headless --path app --script res://tests/erosion_test.gd
 
+# Every GPU kernel against its CPU version (app/tests/gpu_test.gd). Hosted
+# runners have no GPU, so this uses Mesa's software Vulkan driver (lavapipe)
+# under a virtual X server: it checks the kernels and the GPU plumbing, not
+# speed or vendor drivers. Real GPUs are checked locally (docs/gpu.md).
+godot-gpu:
+  stage: test
+  extends: .godot-cache
+  variables:
+    VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+  script:
+    - apt-get update -qq
+    - >
+      apt-get install -y -qq unzip xvfb xauth mesa-vulkan-drivers libvulkan1 libgl1 libx11-6
+      libxcursor1 libxinerama1 libxrandr2 libxi6 libxext6 libxrender1 libfontconfig1 > /dev/null
+    - export GODOT="$(scripts/fetch-godot.sh)"
+    - cargo build -p terrain-godot
+    - $GODOT --headless --path app --import || true
+    - xvfb-run -a $GODOT --path app --rendering-driver vulkan --script res://tests/gpu_test.gd
+
 # ---- build: release library per OS ------------------------------------------
 
 lib-linux:

@@ -13,7 +13,7 @@
 
 use std::path::Path;
 
-use terrain_core::{EvalOptions, Grid, GridSpec, Project, Value, evaluate_node};
+use terrain_core::{EvalOptions, Grid, GridSpec, PortType, Project, evaluate_node};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -79,9 +79,10 @@ fn main() {
         .unwrap_or_else(|| panic!("{node} has no output '{port}'"));
     let (lo, hi) = value.grid().min_max();
     println!("{node} at {res}²: {lo:.2} .. {hi:.2}  ({ms:.0} ms)");
-    let rgb = match value {
-        Value::Heightfield(g) => shade(g, project.world.height_range_m),
-        Value::Mask(g) => g
+    let g = value.grid();
+    let rgb = match value.port_type() {
+        PortType::Heightfield => shade(g, project.world.height_range_m),
+        PortType::Mask => g
             .data
             .iter()
             .flat_map(|&v| [(v.clamp(0.0, 1.0) * 255.0) as u8; 3])

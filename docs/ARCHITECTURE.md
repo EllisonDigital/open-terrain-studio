@@ -215,6 +215,13 @@ Every node ships a CPU implementation first; slow nodes later gain a GLSL comput
 - **Tolerance.** GPU float results differ slightly between vendors. Tests compare GPU against CPU with a per-node tolerance (e.g. max height error < 0.01% of height range).
 - **Timeouts.** Long simulations are split into many short dispatches so the OS never kills the GPU driver for hanging (TDR on Windows is about 2 seconds).
 
+> **Changed 25 Sep 2026 (v0.4):** how this was built; details in [gpu.md](gpu.md).
+> - Compute uses a **local RenderingDevice** owned by one dedicated thread, not the renderer's main device: a local device only works on the thread that created it, and evaluation runs on worker threads. The viewport therefore still receives a downloaded image; zero-copy preview textures are left for later.
+> - `terrain-core` stays Godot-free: it defines a small `GpuDevice` trait (buffers of `f32`, GLSL kernels, a 128-byte parameter block) that `terrain-godot` implements. Nodes implement `NodeKind::evaluate_gpu`; their outputs are `Value::Gpu` and are downloaded only when something on the CPU first reads them.
+> - GPU results are cached under separate keys. **Builds and exports use the CPU by default**, so exported files stay bit-identical across machines; the Build tab can opt into the GPU, and `build.json` records the choice.
+> - Kernels are one file per node family (`shaders/noise.comp`, `adjust.comp`, …), not one per node.
+> - Priority order in practice: noise, filters and masks, then thermal erosion. Hydraulic erosion's solver (v0.3, stream power on Priority-Flood routing) is sequential along the drainage tree and has no kernel yet.
+
 ---
 
 ## 7. Viewport and rendering
@@ -373,6 +380,7 @@ open-terrain-studio/
 - **Resolution tests:** 512² vs downsampled 2,048² must match within tolerance (section 4).
   > **Changed 25 Sep 2026 (v0.2):** 513² vs every fourth sample of 2,049² (see section 4).
 - **GPU vs CPU tests:** run where a GPU is available (locally and on a GPU CI runner later).
+  > **Changed 25 Sep 2026 (v0.4):** `app/tests/gpu_test.gd` runs every kernel against the CPU inside the app (a device needs Godot). CI runs it on Mesa's software Vulkan driver under a virtual X server; real GPUs are tested locally.
 - **Benchmarks** (`criterion`) for hot nodes, tracked per release.
 
 **CI and releases:** GitLab CI builds and tests the Rust crates and exports the Godot app on every merge request and tag. Linux jobs run on GitLab's shared runners; Windows and macOS jobs use shared runners where the plan allows, otherwise a self-hosted runner used for release builds. Tagged releases publish one download per OS through GitLab Releases; nightly builds can go to the Package Registry. `main` is protected: changes land through merge requests with passing CI.

@@ -1,0 +1,866 @@
+{
+  "format_version": 1,
+  "app_version": "0.3.0",
+  "world": {
+    "size_m": [
+      16384,
+      16384
+    ],
+    "height_range_m": [
+      0,
+      4800
+    ],
+    "seed": 47019
+  },
+  "next_node_id": 27,
+  "nodes": [
+    {
+      "id": "n_0001",
+      "type": "noise.fbm",
+      "type_version": 1,
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "basis": "simplex",
+        "feature_size_m": 11600.0,
+        "height_m": 1000,
+        "base_m": 850,
+        "octaves": 5,
+        "gain": 0.48,
+        "seed": 412
+      }
+    },
+    {
+      "id": "n_0002",
+      "type": "noise.ridged",
+      "type_version": 1,
+      "pos": [
+        0,
+        220
+      ],
+      "params": {
+        "basis": "perlin",
+        "feature_size_m": 4960.0,
+        "height_m": 1050,
+        "base_m": 0,
+        "octaves": 6,
+        "gain": 0.5,
+        "seed": 89
+      }
+    },
+    {
+      "id": "n_0003",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        340,
+        60
+      ],
+      "params": {
+        "mode": "max",
+        "ratio": 1.0
+      }
+    },
+    {
+      "id": "n_0004",
+      "type": "terrain.ridge",
+      "type_version": 1,
+      "pos": [
+        0,
+        470
+      ],
+      "params": {
+        "angle_deg": 24,
+        "length_m": 15280.0,
+        "width_m": 2640.0,
+        "height_m": 2750,
+        "base_m": 0,
+        "meander_m": 800.0,
+        "ridges": 0.78,
+        "roughness": 0.58,
+        "pos_x_m": 8240.0,
+        "pos_y_m": 6480.0,
+        "seed": 27
+      }
+    },
+    {
+      "id": "n_0005",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        370,
+        280
+      ],
+      "params": {
+        "mode": "max",
+        "ratio": 1.0
+      }
+    },
+    {
+      "id": "n_0006",
+      "type": "terrain.mountain",
+      "type_version": 1,
+      "pos": [
+        0,
+        720
+      ],
+      "params": {
+        "radius_m": 2720.0,
+        "height_m": 2150,
+        "base_m": 0,
+        "style": "alpine",
+        "ridges": 0.78,
+        "roughness": 0.65,
+        "pos_x_m": 6600.0,
+        "pos_y_m": 9520.0,
+        "seed": 101
+      }
+    },
+    {
+      "id": "n_0007",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        700,
+        280
+      ],
+      "params": {
+        "mode": "max",
+        "ratio": 1.0
+      }
+    },
+    {
+      "id": "n_0008",
+      "type": "terrain.mountain",
+      "type_version": 1,
+      "pos": [
+        0,
+        950
+      ],
+      "params": {
+        "radius_m": 2280.0,
+        "height_m": 2500,
+        "base_m": 0,
+        "style": "alpine",
+        "ridges": 0.86,
+        "roughness": 0.62,
+        "pos_x_m": 11440.0,
+        "pos_y_m": 6720.0,
+        "seed": 73
+      }
+    },
+    {
+      "id": "n_0009",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        1010,
+        280
+      ],
+      "params": {
+        "mode": "max",
+        "ratio": 1.0
+      }
+    },
+    {
+      "id": "n_000a",
+      "type": "terrain.mountain",
+      "type_version": 1,
+      "pos": [
+        0,
+        1180
+      ],
+      "params": {
+        "radius_m": 2160.0,
+        "height_m": 1950,
+        "base_m": 0,
+        "style": "alpine",
+        "ridges": 0.72,
+        "roughness": 0.55,
+        "pos_x_m": 3840.0,
+        "pos_y_m": 5200.0,
+        "seed": 208
+      }
+    },
+    {
+      "id": "n_000b",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        1320,
+        280
+      ],
+      "params": {
+        "mode": "max",
+        "ratio": 1.0
+      }
+    },
+    {
+      "id": "n_000c",
+      "type": "terrain.plateau",
+      "type_version": 1,
+      "pos": [
+        0,
+        1420
+      ],
+      "params": {
+        "radius_m": 1400.0,
+        "height_m": 650,
+        "base_m": 0,
+        "cliff_m": 150,
+        "talus_m": 900,
+        "talus_height": 0.42,
+        "edge_m": 330,
+        "roughness": 0.42,
+        "pos_x_m": 3520.0,
+        "pos_y_m": 10080.0,
+        "seed": 66
+      }
+    },
+    {
+      "id": "n_000d",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        1630,
+        280
+      ],
+      "params": {
+        "mode": "max",
+        "ratio": 1.0
+      }
+    },
+    {
+      "id": "n_000e",
+      "type": "terrain.crater",
+      "type_version": 1,
+      "pos": [
+        0,
+        1660
+      ],
+      "params": {
+        "radius_m": 1504.0,
+        "depth_m": 680,
+        "rim_height_m": 260,
+        "rim_width": 0.72,
+        "floor": 0.34,
+        "roughness": 0.34,
+        "base_m": 0,
+        "pos_x_m": 11600.0,
+        "pos_y_m": 6840.0,
+        "seed": 319
+      }
+    },
+    {
+      "id": "n_000f",
+      "type": "terrain.canyon",
+      "type_version": 1,
+      "pos": [
+        1970,
+        280
+      ],
+      "params": {
+        "angle_deg": 12,
+        "depth_m": 440,
+        "width_m": 784.0,
+        "floor_width_m": 168.0,
+        "steps": 4,
+        "meander_m": 920.0,
+        "meander_size_m": 4080.0,
+        "roughness": 0.62,
+        "surface_m": 0,
+        "pos_x_m": 8080.0,
+        "pos_y_m": 3200.0,
+        "seed": 53
+      }
+    },
+    {
+      "id": "n_0010",
+      "type": "adjust.warp",
+      "type_version": 1,
+      "pos": [
+        2290,
+        280
+      ],
+      "params": {
+        "size_m": 6240.0,
+        "strength_m": 116.0,
+        "seed": 702
+      }
+    },
+    {
+      "id": "n_0011",
+      "type": "data.height_mask",
+      "type_version": 1,
+      "pos": [
+        2290,
+        520
+      ],
+      "params": {
+        "low_m": 1050,
+        "high_m": 4800,
+        "falloff_m": 550
+      }
+    },
+    {
+      "id": "n_0012",
+      "type": "noise.fbm",
+      "type_version": 1,
+      "pos": [
+        1970,
+        760
+      ],
+      "params": {
+        "basis": "value",
+        "feature_size_m": 1000.0,
+        "height_m": 240,
+        "base_m": -120,
+        "octaves": 4,
+        "gain": 0.52,
+        "seed": 901
+      }
+    },
+    {
+      "id": "n_0013",
+      "type": "combine.combine",
+      "type_version": 1,
+      "pos": [
+        2610,
+        280
+      ],
+      "params": {
+        "mode": "add",
+        "ratio": 0.72
+      }
+    },
+    {
+      "id": "n_0014",
+      "type": "data.rock_hardness",
+      "type_version": 1,
+      "pos": [
+        2290,
+        900
+      ],
+      "params": {
+        "layer_thickness_m": 95,
+        "offset_m": 1050,
+        "soft_hardness": 0.12,
+        "hard_hardness": 0.82
+      }
+    },
+    {
+      "id": "n_0015",
+      "type": "simulate.hydraulic",
+      "type_version": 1,
+      "pos": [
+        2930,
+        280
+      ],
+      "params": {
+        "duration_kyr": 350,
+        "rainfall_m_yr": 1.7,
+        "rock_softness": 0.62,
+        "sediment_capacity": 1.65,
+        "deposition_rate": 0.48,
+        "evaporation": 0.025,
+        "downcutting": 1.0,
+        "detail_m": 40,
+        "creep_m2_yr": 0.001
+      }
+    },
+    {
+      "id": "n_0016",
+      "type": "simulate.thermal",
+      "type_version": 1,
+      "pos": [
+        3250,
+        280
+      ],
+      "params": {
+        "duration_s": 8,
+        "talus_angle_deg": 32,
+        "diffusivity_m2_s": 8
+      }
+    },
+    {
+      "id": "n_0017",
+      "type": "adjust.levels",
+      "type_version": 1,
+      "pos": [
+        3570,
+        280
+      ],
+      "params": {
+        "auto_input": true,
+        "world_output": true,
+        "gamma": 1.0
+      }
+    },
+    {
+      "id": "n_0018",
+      "type": "data.slope",
+      "type_version": 1,
+      "pos": [
+        3890,
+        520
+      ],
+      "params": {
+        "min_deg": 38,
+        "max_deg": 90,
+        "falloff_deg": 7
+      }
+    },
+    {
+      "id": "n_0019",
+      "type": "data.curvature",
+      "type_version": 1,
+      "pos": [
+        3890,
+        760
+      ],
+      "params": {
+        "mode": "both",
+        "radius_m": 260,
+        "range_m": 28
+      }
+    },
+    {
+      "id": "n_001a",
+      "type": "data.height_mask",
+      "type_version": 1,
+      "pos": [
+        3890,
+        1000
+      ],
+      "params": {
+        "low_m": 2850,
+        "high_m": 4800,
+        "falloff_m": 220
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": [
+        "n_000d",
+        "out"
+      ],
+      "to": [
+        "n_000e",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_000e",
+        "out"
+      ],
+      "to": [
+        "n_000f",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_000f",
+        "out"
+      ],
+      "to": [
+        "n_0010",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0010",
+        "out"
+      ],
+      "to": [
+        "n_0011",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0010",
+        "out"
+      ],
+      "to": [
+        "n_0013",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0012",
+        "out"
+      ],
+      "to": [
+        "n_0013",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0011",
+        "out"
+      ],
+      "to": [
+        "n_0013",
+        "mask"
+      ]
+    },
+    {
+      "from": [
+        "n_0013",
+        "out"
+      ],
+      "to": [
+        "n_0014",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0013",
+        "out"
+      ],
+      "to": [
+        "n_0015",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0014",
+        "out"
+      ],
+      "to": [
+        "n_0015",
+        "hardness"
+      ]
+    },
+    {
+      "from": [
+        "n_0015",
+        "height"
+      ],
+      "to": [
+        "n_0016",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0016",
+        "height"
+      ],
+      "to": [
+        "n_0017",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_0018",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_0019",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_001a",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0001",
+        "out"
+      ],
+      "to": [
+        "n_0003",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0002",
+        "out"
+      ],
+      "to": [
+        "n_0003",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "out"
+      ],
+      "to": [
+        "n_0005",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0004",
+        "out"
+      ],
+      "to": [
+        "n_0005",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0005",
+        "out"
+      ],
+      "to": [
+        "n_0007",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0006",
+        "out"
+      ],
+      "to": [
+        "n_0007",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0007",
+        "out"
+      ],
+      "to": [
+        "n_0009",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0008",
+        "out"
+      ],
+      "to": [
+        "n_0009",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0009",
+        "out"
+      ],
+      "to": [
+        "n_000b",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_000a",
+        "out"
+      ],
+      "to": [
+        "n_000b",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_000b",
+        "out"
+      ],
+      "to": [
+        "n_000d",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "n_000c",
+        "out"
+      ],
+      "to": [
+        "n_000d",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0013",
+        "out"
+      ],
+      "to": [
+        "n_0014",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0013",
+        "out"
+      ],
+      "to": [
+        "n_0015",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0014",
+        "out"
+      ],
+      "to": [
+        "n_0015",
+        "hardness"
+      ]
+    },
+    {
+      "from": [
+        "n_0015",
+        "height"
+      ],
+      "to": [
+        "n_0016",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0016",
+        "height"
+      ],
+      "to": [
+        "n_0017",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_0018",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_0019",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_001a",
+        "in"
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "node": "n_0017",
+      "port": "out",
+      "format": "exr32"
+    },
+    {
+      "node": "n_0017",
+      "port": "out",
+      "format": "png16"
+    },
+    {
+      "node": "n_0015",
+      "port": "flow",
+      "format": "png16"
+    },
+    {
+      "node": "n_0015",
+      "port": "wear",
+      "format": "png16"
+    },
+    {
+      "node": "n_0015",
+      "port": "deposition",
+      "format": "png16"
+    },
+    {
+      "node": "n_0015",
+      "port": "sediment",
+      "format": "png16"
+    },
+    {
+      "node": "n_0016",
+      "port": "debris",
+      "format": "png16"
+    },
+    {
+      "node": "n_0018",
+      "port": "out",
+      "format": "png16"
+    },
+    {
+      "node": "n_0019",
+      "port": "out",
+      "format": "png16"
+    },
+    {
+      "node": "n_001a",
+      "port": "out",
+      "format": "png16"
+    }
+  ],
+  "build": {
+    "resolution": 2017,
+    "folder": "output/asterfall_crown"
+  },
+  "ui": {
+    "viewed_node": "n_0017",
+    "preview_resolution": 512,
+    "camera": {
+      "yaw": -0.6108652381980153,
+      "pitch": -0.5585053606381855,
+      "distance": 15565.0,
+      "target": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  }
+}

@@ -131,17 +131,18 @@ impl<'a> Domain<'a> {
     fn softness(&self, i: usize) -> f32 {
         1.0 - self.hardness.map_or(0.0, |g| g.data[i].clamp(0.0, 1.0))
     }
-    fn steps(&self, duration: f64, max_dt: f32, ctx: &EvalContext) -> Result<(usize, f32)> {
-        let steps = (duration / max_dt as f64).ceil().max(1.0);
-        if steps > 100_000.0 {
-            return Err(CoreError::NodeFailed {
-                node: ctx.node_id.into(),
-                message: "erosion needs more than 100,000 steps; reduce duration or increase world extent"
-                    .into(),
-            });
-        }
-        Ok((steps as usize, (duration / steps) as f32))
+}
+
+/// Number and length of time steps no longer than `max_dt`.
+fn time_steps(duration: f64, max_dt: f32, ctx: &EvalContext) -> Result<(usize, f32)> {
+    let steps = (duration / max_dt as f64).ceil().max(1.0);
+    if steps > 100_000.0 {
+        return Err(CoreError::NodeFailed {
+            node: ctx.node_id.into(),
+            message: "erosion needs more than 100,000 steps; reduce duration or increase world extent".into(),
+        });
     }
+    Ok((steps as usize, (duration / steps) as f32))
 }
 
 /// Stable physical scale, not per-image min/max: output does not change contrast
