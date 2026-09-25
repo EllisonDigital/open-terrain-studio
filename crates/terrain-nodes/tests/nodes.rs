@@ -130,8 +130,8 @@ fn golden_hashes() {
     for (k, v) in &hashes {
         match stored.get(k) {
             Some(s) if s == v => {}
-            Some(_) => changed.push(format!("{k} changed")),
-            None => changed.push(format!("{k} has no stored hash")),
+            Some(_) => changed.push(format!("{k} changed (now {v})")),
+            None => changed.push(format!("{k} has no stored hash (now {v})")),
         }
     }
     assert!(
