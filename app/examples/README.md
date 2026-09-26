@@ -25,3 +25,11 @@ The v0.6 **Colour** tab builds a colour map from grass, rock, sand, snow and wat
 plus a four-layer splat map and normal map. Height and masks arrive from the
 Terrain tab through portals. These new outputs are also marked for export;
 see [colour.md](../../docs/colour.md).
+
+**Forest valley** is the v0.7 vegetation example: an eroded mountain with Wetness and Snow, then three chained
+populations. Scots pine grows high and dry; silver birch takes the damp valleys and keeps out of the pines;
+hazel shrubs intermingle with both. Rocks gather on thermal-erosion talus and in the pines' dead zones. The
+densities, pine dead zones and an RGBA pack of all four are marked for export as PNG 8, and every population's
+points as CSV. **Asterfall Crown** has the same chain (crown pine, valley birch, krummholz, boulders) on its
+finished landscape. Species presets for vegetation nodes are in `species/`. See
+[vegetation.md](../../docs/vegetation.md).

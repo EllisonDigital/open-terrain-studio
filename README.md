@@ -40,6 +40,7 @@ To use exported heightmaps in Blender, Unreal Engine or Godot, see the [export g
 
 - [Water and hydrology](docs/water.md): flow, rivers, lakes, sea, snow and wetness.
 - [Colour and texturing](docs/colour.md): Colour tab, gradients, material weights, normal maps and exports.
+- [Vegetation](docs/vegetation.md): Trees, Shrubs, Grass and Rocks, species presets, and point export.
 - [Export guides](docs/export-guides.md): importing heightmaps into Blender, Unreal Engine and Godot at the right scale.
 - [Architecture](docs/ARCHITECTURE.md): how the application and terrain engine are designed.
 - [Roadmap](docs/ROADMAP.md): milestones from v0.1 to v1.0, risks and decisions.
@@ -89,6 +90,8 @@ export the apps and publish a GitHub Release; see [`.github/workflows/ci.yml`](.
 - **Viewport:** drag to orbit, Shift-drag or middle-drag to pan, scroll to zoom, <kbd>F</kbd> to frame.
   <kbd>Tab</kbd> switches to the **2D map**, which shows the position and value under the mouse.
 - **Masks** (Slope, Height Mask, Curvature…) are shown as a colour overlay on the terrain they came from.
+- **Vegetation** nodes draw their plants as placeholder shapes (toggle *Plants*); *Data view* shows what shapes a
+  population. Pick a *Species preset* in a Trees, Shrubs or Grass node's settings.
 - **Mask ports:** settings with a *Mask port* button can be driven by a mask. Click it and connect a mask to
   the new green input: black scales the value to 0, white keeps the value you set.
 - **Undo/redo:** <kbd>Ctrl</kbd>+<kbd>Z</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> (or
@@ -113,6 +116,7 @@ says how many ("1 node computed, 7 ms").
 | Data (masks) | Height Mask, Slope, Curvature, Aspect, Select Range, Distance, Rock Hardness, Flow, Wetness |
 | Simulate | Hydraulic Erosion (rivers over geological time), Thermal Erosion, Rivers, Lakes, Sea, Snow (v0.5, see [water](docs/water.md)) |
 | Colour / Output | Colourise, Blend Colours, Colour Layers, Colour Image, Occlusion, Normal Map, Splat Map (v0.6, see [colour](docs/colour.md)) |
+| Vegetation | Trees, Shrubs, Grass, Debris / Rocks, Pack Masks (RGBA) (v0.7, see [vegetation](docs/vegetation.md)) |
 
 ### Tests
 

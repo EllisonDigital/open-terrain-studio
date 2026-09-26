@@ -235,6 +235,8 @@ The 3D viewport renders the terrain from GPU textures with a shader-displaced LO
 
 > **Added 25 Sep 2026 (v0.5):** Rivers, Lakes and Sea each output a *Water surface* Heightfield next to their *Height*. When the viewed output is a heightfield, the builder takes, per pixel, the highest water surface of those nodes upstream where it's above their own height, and the viewport draws it as a second displaced, translucent grid. Masks are shown without water. Details in [water.md](water.md).
 - **Vegetation preview.** Trees/Shrubs points drawn with MultiMesh using simple placeholder meshes (cone/sphere/billboard per species), with a density cap for performance. Final vegetation belongs in the target engine.
+
+> **Added 26 Sep 2026 (v0.7):** the view draws the points of the viewed node and of every vegetation node upstream of it (`Graph::vegetation_sources`). There is one MultiMesh per node: cones for trees, balls for shrubs, tufts for grass, lumps for rocks, at real size. At most 150,000 are drawn: each node gets an equal share, trees first.
 - **Camera.** Orbit, fly and top-down modes; frame-selected; scale reference (a 2 m human-height marker) toggle.
 - **Preview vs build.** The viewport always shows the preview resolution. A "Build" command produces full-resolution results for export.
 
@@ -273,6 +275,15 @@ Vegetation follows Gaea's model: each Trees, Shrubs or Grass node is one populat
 
 **Export options:** one greyscale mask per population, or four populations packed into the R, G, B, A channels of one image, plus point files.
 
+> **Added 26 Sep 2026 (v0.7):** how this was built; details in [vegetation.md](vegetation.md).
+> - `PointSet` is a port type like the grids. A point set holds `x, y, z, rotation_deg, scale` as `f32` per point plus a species index into a list of names. It only connects to point-set inputs. Cached results count its bytes like any other value.
+> - Populations also output **Water influence**, the water signal they responded to: the Water input, or valleys (ground below its surroundings within about 120 m) when none is connected. The data view colours dead zones red, density green and water influence blue.
+> - Occupied saturates: a population's own ground counts as fully taken from a density of 0.5. Chaining therefore keeps later populations out of established cover.
+> - Points: at most one per world-fixed cell of `spacing / √2`, kept with the density's probability and moved (up to three tries) to clear `spacing` from its neighbours. Cells are processed in nine interleaved phases, so the result doesn't depend on thread count; random numbers are keyed by cell coordinates, so points don't move with resolution. A population may sample at most 40 million cells.
+> - Species presets are a flat `key: value` subset of YAML (no dependency), read and written by `terrain_core::preset`. The bundled ones live in `app/examples/species/` so the packaged app can list them.
+> - The Debris/Rocks node is a vegetation-category node that scatters from talus and dead-zone masks. It doesn't read thermal erosion internals.
+> - Pack Masks (RGBA) is a separate Output node: Splat Map normalises weights, which is wrong for densities.
+
 ---
 
 ## 9. Export system
@@ -288,6 +299,8 @@ Any output port on any node can be marked for export (like Gaea's F3), and one B
 | Colour | PNG 8/16-bit RGB(A) | |
 | Normal map | PNG 8/16-bit | OpenGL (Y+) or DirectX (Y−) convention option |
 | Points | CSV, JSON, XYZ | x, y, z, rotation, scale, species id |
+
+> **Changed 26 Sep 2026 (v0.7):** points export as CSV and JSON (XYZ is left out: it can't carry rotation, scale or species). Both write the species *name*, not an id. `x`/`y` are metres from the world origin (row 0 / column 0 of the images), `z` is metres, and `rotation_deg` follows the app's direction convention. `build.json` lists point files with `"data": "point_set"`, their point count and species. See [vegetation.md](vegetation.md#export).
 | Mesh | GLB, OBJ | Decimated or full-res, optional UVs, optional tiling |
 
 **Build settings:** resolution, output folder, filename pattern (`{node}_{output}_{res}`), optional tiling (tile size, naming pattern `x{X}_y{Y}`), and per-output format.
