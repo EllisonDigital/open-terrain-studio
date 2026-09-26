@@ -1,7 +1,7 @@
 # Colour and texturing (v0.6)
 
-Colour work lives in the **Colour** tab. Terrain outputs arrive through portals: select a
-Terrain node, then press **Send … to Colour tab** in its inspector. The portal references the
+Colour work lives in the **Colour** tab. Terrain (and Vegetation) outputs arrive through portals: select a
+node, then press **→ Colour** under *Send to another tab* in its inspector. The portal references the
 original output rather than copying it. Colour edits therefore reuse cached terrain results.
 The tab is stored per node in `.otstudio` projects; older projects open in the Terrain tab.
 

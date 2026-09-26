@@ -5,6 +5,7 @@ Each **Trees**, **Shrubs** or **Grass** node is one population. It outputs where
 mask, one point per plant, and masks for chaining the next population. **Debris / Rocks** scatters rocks from
 talus and dead zones, and **Pack Masks (RGBA)** packs four masks into one image for engines.
 
+Vegetation nodes live in the **Vegetation** graph tab (since v0.7.5), fed from the Terrain tab through portals.
 The *Forest valley* example (**File → Open Example**) chains pine, birch and shrubs on an eroded mountain, with
 rocks below the cliffs. The *Asterfall Crown* example has the same chain on its finished landscape.
 
@@ -130,6 +131,13 @@ water_preference: -0.2
 
 ## In the editor
 
+- **Vegetation tab** (since v0.7.5): vegetation nodes live in their own graph tab, between Terrain and Colour.
+  To use a terrain there, select its node in the Terrain tab and press **→ Vegetation** next to an output
+  under *Send to another tab*. A Height or Mask Portal appears in the Vegetation tab; connect it to the
+  populations' Terrain, Water or Snow inputs.
+- A population's masks can go on to the Colour tab the same way (**→ Colour**), for example to colour forest
+  floors.
+- Projects saved by v0.7 open with their vegetation moved into this tab, fed by portals, with identical results.
 - **Plants** (viewport toolbar) draws the points of the viewed node, and of every vegetation node upstream of it,
   as placeholder shapes at real size: cones for trees, balls for shrubs, tufts for grass, lumps for rocks.
 - At most 150,000 are drawn. Each node gets an equal share, trees first, and a node that needs fewer passes the

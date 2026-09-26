@@ -296,6 +296,9 @@ impl Project {
         exports.sort();
         exports.dedup();
 
+        // v0.7 kept vegetation in the Terrain tab; it has its own tab since v0.7.5.
+        graph.move_vegetation_to_tab(registry);
+
         Ok((
             Project {
                 world: file.world,

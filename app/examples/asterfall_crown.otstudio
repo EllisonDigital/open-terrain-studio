@@ -12,7 +12,7 @@
     ],
     "seed": 47019
   },
-  "next_node_id": 32,
+  "next_node_id": 35,
   "nodes": [
     {
       "id": "n_0001",
@@ -456,6 +456,7 @@
       "id": "n_001c",
       "type": "vegetation.trees",
       "type_version": 1,
+      "tab": "vegetation",
       "pos": [
         4530,
         280
@@ -483,6 +484,7 @@
       "id": "n_001d",
       "type": "vegetation.trees",
       "type_version": 1,
+      "tab": "vegetation",
       "pos": [
         4530,
         640
@@ -508,6 +510,7 @@
       "id": "n_001e",
       "type": "vegetation.shrubs",
       "type_version": 1,
+      "tab": "vegetation",
       "pos": [
         4850,
         460
@@ -533,6 +536,7 @@
       "id": "n_001f",
       "type": "vegetation.debris",
       "type_version": 1,
+      "tab": "vegetation",
       "pos": [
         4850,
         820
@@ -547,6 +551,39 @@
         "scale_min": 0.4,
         "scale_max": 2.5
       }
+    },
+    {
+      "id": "n_0020",
+      "type": "portal.height",
+      "type_version": 1,
+      "pos": [
+        4190,
+        100
+      ],
+      "params": {},
+      "tab": "vegetation"
+    },
+    {
+      "id": "n_0021",
+      "type": "portal.mask",
+      "type_version": 1,
+      "pos": [
+        4190,
+        240
+      ],
+      "params": {},
+      "tab": "vegetation"
+    },
+    {
+      "id": "n_0022",
+      "type": "portal.mask",
+      "type_version": 1,
+      "pos": [
+        4190,
+        900
+      ],
+      "params": {},
+      "tab": "vegetation"
     }
   ],
   "links": [
@@ -912,7 +949,7 @@
     },
     {
       "from": [
-        "n_0017",
+        "n_0020",
         "out"
       ],
       "to": [
@@ -922,7 +959,7 @@
     },
     {
       "from": [
-        "n_0017",
+        "n_0020",
         "out"
       ],
       "to": [
@@ -932,7 +969,7 @@
     },
     {
       "from": [
-        "n_0017",
+        "n_0020",
         "out"
       ],
       "to": [
@@ -942,7 +979,7 @@
     },
     {
       "from": [
-        "n_0017",
+        "n_0020",
         "out"
       ],
       "to": [
@@ -952,8 +989,8 @@
     },
     {
       "from": [
-        "n_001b",
-        "wetness"
+        "n_0021",
+        "out"
       ],
       "to": [
         "n_001c",
@@ -962,8 +999,8 @@
     },
     {
       "from": [
-        "n_001b",
-        "wetness"
+        "n_0021",
+        "out"
       ],
       "to": [
         "n_001d",
@@ -972,8 +1009,8 @@
     },
     {
       "from": [
-        "n_001b",
-        "wetness"
+        "n_0021",
+        "out"
       ],
       "to": [
         "n_001e",
@@ -1002,8 +1039,8 @@
     },
     {
       "from": [
-        "n_0016",
-        "debris"
+        "n_0022",
+        "out"
       ],
       "to": [
         "n_001f",
@@ -1018,6 +1055,36 @@
       "to": [
         "n_001f",
         "dead_zones"
+      ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_0020",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_001b",
+        "wetness"
+      ],
+      "to": [
+        "n_0021",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0016",
+        "debris"
+      ],
+      "to": [
+        "n_0022",
+        "in"
       ]
     }
   ],

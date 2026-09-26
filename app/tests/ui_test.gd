@@ -203,6 +203,21 @@ func run() -> void:
 	main._open_example(_example_index(main, "Forest valley — vegetation"))
 	check(await wait_preview(main), "forest valley previews")
 	check(main.viewed_id == "n_0008" and main._viewed_port() == "density", "opens on the shrub density")
+	# v0.7.5: vegetation lives in its own tab, fed from Terrain through portals.
+	check(main.graph_tabs.current_tab == 1 and main.graph_panel.tab == "vegetation", "opens on the Vegetation tab")
+	check(main.graph_panel.get_node_or_null(NodePath("n_0008")) != null and main.graph_panel.get_node_or_null(NodePath("n_0003")) == null,
+			"Vegetation tab shows plants, not terrain nodes")
+	var portal_node: GraphNode = main.graph_panel.get_node_or_null(NodePath("n_000b"))
+	check(portal_node != null and portal_node.title.begins_with("⇠ Thermal Erosion"), "height portal from Terrain")
+	var veg_types: Array = main.graph_panel._search_types.map(func(t): return t["type_id"])
+	check(veg_types.has("vegetation.trees") and not veg_types.has("terrain.mountain") and not veg_types.has("colour.colourise"),
+			"Vegetation tab offers vegetation nodes")
+	await frames(5)
+	await shot("19_vegetation_tab")
+	main._set_graph_tab(0)
+	var terrain_types: Array = main.graph_panel._search_types.map(func(t): return t["type_id"])
+	check(terrain_types.has("terrain.mountain") and not terrain_types.has("vegetation.trees"), "Terrain tab no longer offers vegetation nodes")
+	main._set_graph_tab(1)
 	check(main.view.get_plant_instance_count() > 1000, "plants drawn: %d" % main.view.get_plant_instance_count())
 	check(main._stats_label.text.contains("plants"), "stats count plants: " + main._stats_label.text)
 	main.view.set_camera_state({"yaw": -0.7, "pitch": -0.3, "distance": 260.0, "target": [-1900.0, 120.0, 1500.0]})
@@ -234,6 +249,13 @@ func run() -> void:
 	var export_boxes: Array = main.inspector.find_children("*", "CheckBox", true, false).map(func(c): return c.text)
 	check(export_boxes.has("CSV") and export_boxes.has("JSON"), "point export formats offered")
 	main._message.hide()
+	# Send buttons: Terrain outputs go to Vegetation or Colour, vegetation masks on to Colour.
+	var send_labels: Array = main.inspector.find_children("*", "Button", true, false).map(func(b): return b.text)
+	check(send_labels.has("→ Colour") and not send_labels.has("→ Vegetation"), "a population sends on to Colour only")
+	main.inspector.send_to_tab.emit("n_0005", "snow", "vegetation")
+	check(main.graph_tabs.current_tab == 1 and main.graph.has_node(main.viewed_id) and main._port_type_of(main.viewed_id, "out") == "mask",
+			"snow sent to the Vegetation tab as a mask portal")
+	check(await wait_preview(main), "portal preview")
 
 	# Erosion: pick each output of Hydraulic Erosion from the toolbar.
 	main._open_example(3)

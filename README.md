@@ -90,6 +90,8 @@ export the apps and publish a GitHub Release; see [`.github/workflows/ci.yml`](.
 - **Viewport:** drag to orbit, Shift-drag or middle-drag to pan, scroll to zoom, <kbd>F</kbd> to frame.
   <kbd>Tab</kbd> switches to the **2D map**, which shows the position and value under the mouse.
 - **Masks** (Slope, Height Mask, Curvature…) are shown as a colour overlay on the terrain they came from.
+- **Graph tabs:** Terrain, Vegetation and Colour. Send a Terrain output to another tab with the **→ Vegetation** or
+  **→ Colour** buttons in its settings; it arrives there as a portal.
 - **Vegetation** nodes draw their plants as placeholder shapes (toggle *Plants*); *Data view* shows what shapes a
   population. Pick a *Species preset* in a Trees, Shrubs or Grass node's settings.
 - **Mask ports:** settings with a *Mask port* button can be driven by a mask. Click it and connect a mask to

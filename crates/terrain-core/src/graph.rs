@@ -10,13 +10,14 @@ use crate::params::ParamValue;
 pub type NodeId = String;
 
 /// The graph editor tab a node belongs to (ARCHITECTURE.md §5). Tabs only
-/// organise the editor: links may cross them (the Colour tab reads Terrain
-/// outputs through portal nodes) and evaluation ignores them.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// organise the editor: links may cross them (the Vegetation and Colour tabs
+/// read other tabs' outputs through portal nodes) and evaluation ignores them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tab {
     #[default]
     Terrain,
+    Vegetation,
     Colour,
 }
 
@@ -24,6 +25,7 @@ impl Tab {
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "terrain" => Some(Self::Terrain),
+            "vegetation" => Some(Self::Vegetation),
             "colour" => Some(Self::Colour),
             _ => None,
         }
@@ -31,10 +33,32 @@ impl Tab {
     pub fn key(self) -> &'static str {
         match self {
             Self::Terrain => "terrain",
+            Self::Vegetation => "vegetation",
             Self::Colour => "colour",
         }
     }
+    /// Name shown in the editor, e.g. "Vegetation".
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Terrain => "Terrain",
+            Self::Vegetation => "Vegetation",
+            Self::Colour => "Colour",
+        }
+    }
 }
+
+/// The portal node type that carries data of type `ty` between tabs, if any
+/// (heights and masks only).
+pub fn portal_type(ty: crate::node::PortType) -> Option<&'static str> {
+    match ty {
+        crate::node::PortType::Heightfield => Some("portal.height"),
+        crate::node::PortType::Mask => Some("portal.mask"),
+        _ => None,
+    }
+}
+
+/// Vertical distance between portals stacked by [`Graph::move_vegetation_to_tab`].
+const PORTAL_STEP: f32 = 140.0;
 
 /// One node placed in the graph.
 #[derive(Clone, Debug, PartialEq)]
@@ -179,6 +203,109 @@ impl Graph {
                 return id;
             }
         }
+    }
+
+    /// Bring `from.from_port` into `tab` through a new portal at `pos`, and
+    /// return the portal's id. Only heights and masks travel through portals.
+    pub fn add_portal(
+        &mut self,
+        registry: &NodeRegistry,
+        from: &str,
+        from_port: &str,
+        tab: Tab,
+        pos: [f32; 2],
+    ) -> Result<NodeId> {
+        let from_node = self
+            .nodes
+            .get(from)
+            .ok_or_else(|| CoreError::NodeNotFound(from.into()))?;
+        let ty = registry
+            .schema(&from_node.type_id)
+            .and_then(|s| s.output(from_port))
+            .ok_or_else(|| CoreError::PortNotFound {
+                node: from.into(),
+                port: from_port.into(),
+            })?
+            .ty;
+        let portal = portal_type(ty).ok_or_else(|| CoreError::InvalidLink {
+            from: format!("{from}.{from_port}"),
+            to: format!("the {} tab", tab.label()),
+            reason: "only heights and masks travel through portals".into(),
+        })?;
+        let id = self.add_node(registry, portal, pos)?;
+        self.set_tab(&id, tab)?;
+        self.connect(registry, from, from_port, &id, "in")?;
+        Ok(id)
+    }
+
+    /// Put every Vegetation node that sits in the Terrain tab (as in v0.7
+    /// projects) in the Vegetation tab, and route every height or mask link
+    /// that then crosses tabs through a portal in the receiving tab, so no link
+    /// is hidden. Results are unchanged: a portal passes its input through.
+    /// Returns how many nodes moved.
+    pub fn move_vegetation_to_tab(&mut self, registry: &NodeRegistry) -> usize {
+        let moved: Vec<NodeId> = self
+            .nodes
+            .values()
+            .filter(|n| {
+                n.tab == Tab::Terrain
+                    && registry
+                        .schema(&n.type_id)
+                        .is_some_and(|s| s.category == "Vegetation")
+            })
+            .map(|n| n.id.clone())
+            .collect();
+        if moved.is_empty() {
+            return 0;
+        }
+        for id in &moved {
+            if let Some(n) = self.nodes.get_mut(id) {
+                n.tab = Tab::Vegetation;
+            }
+        }
+        // Links that now cross tabs into something other than a portal.
+        let crossing: Vec<Link> = self
+            .links
+            .iter()
+            .filter(|l| {
+                let (Some(a), Some(b)) = (self.nodes.get(&l.from.0), self.nodes.get(&l.to.0)) else {
+                    return false;
+                };
+                a.tab != b.tab && !b.type_id.starts_with("portal.")
+            })
+            .cloned()
+            .collect();
+        // One portal per source output and receiving tab, stacked left of that tab's nodes.
+        let mut portals: BTreeMap<(NodeId, String, Tab), NodeId> = BTreeMap::new();
+        let mut stacked: BTreeMap<Tab, usize> = BTreeMap::new();
+        for link in crossing {
+            let tab = self.nodes[&link.to.0].tab;
+            let key = (link.from.0.clone(), link.from.1.clone(), tab);
+            let portal = match portals.get(&key) {
+                Some(p) => p.clone(),
+                None => {
+                    let (left, top) = self
+                        .nodes
+                        .values()
+                        .filter(|n| n.tab == tab)
+                        .fold((f32::INFINITY, f32::INFINITY), |(x, y), n| {
+                            (x.min(n.pos[0]), y.min(n.pos[1]))
+                        });
+                    let k = stacked.entry(tab).or_insert(0);
+                    let pos = [left - 340.0, top + PORTAL_STEP * *k as f32];
+                    let Ok(p) = self.add_portal(registry, &link.from.0, &link.from.1, tab, pos) else {
+                        // Points and colour maps have no portal: leave the link as it is.
+                        continue;
+                    };
+                    *k += 1;
+                    portals.insert(key, p.clone());
+                    p
+                }
+            };
+            // Replacing the link into this input keeps the graph acyclic.
+            let _ = self.connect(registry, &portal, "out", &link.to.0, &link.to.1);
+        }
+        moved.len()
     }
 
     /// Remove a node and every link touching it.

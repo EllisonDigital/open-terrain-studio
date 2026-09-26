@@ -8,7 +8,8 @@ const GradientEditor := preload("res://scripts/gradient_editor.gd")
 signal param_changed(node_id: String, key: String, value: Variant)
 signal port_toggled(node_id: String, key: String, exposed: bool)
 signal export_toggled(node_id: String, port: String, format: String, on: bool)
-signal send_to_colour(node_id: String, port: String)
+## Bring an output into another tab ("vegetation" or "colour") as a portal.
+signal send_to_tab(node_id: String, port: String, tab: String)
 signal world_changed
 ## A species preset (YAML text) was chosen for a vegetation node.
 signal species_preset_chosen(node_id: String, text: String)
@@ -358,27 +359,38 @@ func _add_export_section(node: Dictionary) -> void:
 			cb.toggled.connect(func(on): export_toggled.emit(id, port, format, on))
 			h.add_child(cb)
 		_box.add_child(h)
-	_add_colour_section(node)
+	_add_send_section(node)
 
 
-## Terrain nodes: buttons that bring an output into the Colour tab.
-func _add_colour_section(node: Dictionary) -> void:
-	if node.get("tab", "terrain") != "terrain":
-		return
+## Terrain and Vegetation nodes: buttons that bring an output into a later tab
+## (Terrain to Vegetation and Colour, Vegetation to Colour) as a portal.
+func _add_send_section(node: Dictionary) -> void:
+	var targets: Array = {"terrain": ["vegetation", "colour"], "vegetation": ["colour"]}.get(node.get("tab", "terrain"), [])
 	var sendable: Array = node["outputs"].filter(func(o): return o["type"] in ["heightfield", "mask"])
-	if sendable.is_empty():
+	if targets.is_empty() or sendable.is_empty():
 		return
 	_box.add_child(HSeparator.new())
-	_subheading("Colour tab")
-	_note("Colour the terrain in the Colour tab: send an output there as a portal.")
+	_subheading("Send to another tab")
+	if targets.has("vegetation"):
+		_note("Grow plants on it in the Vegetation tab, or colour it in the Colour tab: the output arrives there as a portal.")
+	else:
+		_note("Use it in the Colour tab (e.g. to colour forests): the output arrives there as a portal.")
+	var id: String = node["id"]
 	for o in sendable:
-		var b := Button.new()
-		b.text = "Send %s to Colour tab" % o["label"] if sendable.size() > 1 else "Send to Colour tab"
-		b.tooltip_text = "Adds a portal in the Colour tab that brings this output there."
-		var id: String = node["id"]
+		var h := HBoxContainer.new()
+		var l := Label.new()
+		l.text = o["label"] if sendable.size() > 1 else "Send to"
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		h.add_child(l)
 		var port: String = o["key"]
-		b.pressed.connect(func(): send_to_colour.emit(id, port))
-		_box.add_child(b)
+		for tab in targets:
+			var b := Button.new()
+			b.text = "→ %s" % String(tab).capitalize()
+			b.tooltip_text = "Adds a portal in the %s tab that brings %s there." % [String(tab).capitalize(), o["label"]]
+			var target: String = tab
+			b.pressed.connect(func(): send_to_tab.emit(id, port, target))
+			h.add_child(b)
+		_box.add_child(h)
 
 
 # ---- species presets --------------------------------------------------------
