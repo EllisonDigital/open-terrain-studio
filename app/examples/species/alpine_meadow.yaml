@@ -1,0 +1,24 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Alpine meadow
+node: vegetation.grass
+biome: alpine
+description: Short turf and flowers on high pastures, thinning on scree and exposed crests.
+species: alpine_meadow
+coverage: 0.85
+health: 0.75
+water_preference: 0.15
+spread_m: 4
+patches: 0.35
+patch_size_m: 30
+slope_max_deg: 35
+height_min_m: 1100
+height_max_m: 2500
+avoid_peaks: 0.3
+snow_tolerance: 0.7
+occupied_strength: 0.9
+dead_zones: 0.5
+dead_slope_deg: 36
+spacing_m: 2
+scale_min: 0.4
+scale_max: 1.1

@@ -1,0 +1,24 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Norway spruce
+node: vegetation.trees
+biome: temperate
+description: Dense conifer of cool, damp slopes and mountain valleys.
+species: norway_spruce
+coverage: 0.9
+health: 0.8
+water_preference: 0.35
+spread_m: 30
+patches: 0.25
+patch_size_m: 220
+randomness: 0.2
+slope_max_deg: 40
+height_min_m: 400
+height_max_m: 1700
+height_falloff_m: 120
+avoid_peaks: 0.4
+snow_tolerance: 0.6
+dead_zones: 0.6
+spacing_m: 6
+scale_min: 0.8
+scale_max: 1.3

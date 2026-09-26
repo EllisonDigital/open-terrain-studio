@@ -1,0 +1,22 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Saguaro
+node: vegetation.trees
+biome: desert
+description: Tall columnar cactus of dry, rocky fans and hillsides, widely spaced.
+species: saguaro
+coverage: 0.45
+health: 0.6
+water_preference: -0.4
+spread_m: 10
+patches: 0.4
+patch_size_m: 250
+randomness: 0.5
+slope_max_deg: 30
+height_max_m: 1300
+avoid_peaks: 0.1
+snow_tolerance: 0
+dead_zones: 0.3
+spacing_m: 14
+scale_min: 0.5
+scale_max: 1.4

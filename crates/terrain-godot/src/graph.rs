@@ -1,4 +1,5 @@
 use godot::prelude::*;
+use terrain_core::preset::SpeciesPreset;
 use terrain_core::{NodeSchema, PortType, Tab};
 
 use crate::convert::{json_to_variant, param_to_variant, put, variant_to_param};
@@ -237,9 +238,10 @@ impl TerrainGraph {
         let portal = match ty {
             Some(PortType::Heightfield) => "portal.height",
             Some(PortType::Mask) => "portal.mask",
-            Some(PortType::ColorMap) => {
+            Some(PortType::ColorMap | PortType::PointSet) => {
                 self.fail(
-                    "colour maps are made in the Colour tab; only heights and masks can be sent".into(),
+                    "only heights and masks can be sent to the Colour tab (colour maps are made there; points aren't colours)"
+                        .into(),
                 );
                 return GString::new();
             }
@@ -385,6 +387,93 @@ impl TerrainGraph {
         (0..n)
             .map(|i| curve.eval(i as f64 / (n - 1) as f64) as f32)
             .collect()
+    }
+
+    /// Read a species preset file's text: `ok`, and `name`, `node` (the node
+    /// type it is for), `biome` and `description`, or `error`.
+    #[func]
+    fn read_species_preset(text: GString) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        match SpeciesPreset::parse(&text.to_string()) {
+            Ok(p) => {
+                put(&mut d, "ok", true);
+                put(&mut d, "name", GString::from(p.name.as_str()));
+                put(&mut d, "node", GString::from(p.node.as_str()));
+                put(&mut d, "biome", GString::from(p.biome.as_str()));
+                put(&mut d, "description", GString::from(p.description.as_str()));
+            }
+            Err(e) => {
+                put(&mut d, "ok", false);
+                put(&mut d, "error", GString::from(e.to_string().as_str()));
+            }
+        }
+        d
+    }
+
+    /// Apply a species preset (a YAML file's text) to node `id` as one undo
+    /// step. Returns `ok`, `name`, `warnings` (keys the node doesn't have,
+    /// values it can't take) and, on failure, `error`.
+    #[func]
+    fn apply_species_preset(&mut self, id: GString, text: GString) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let id = id.to_string();
+        let result = SpeciesPreset::parse(&text.to_string()).and_then(|preset| {
+            let label = format!("Apply preset {}", preset.name);
+            lock(&self.shared).edit(&label, None, |p| {
+                let node = p
+                    .graph
+                    .node(&id)
+                    .ok_or_else(|| terrain_core::CoreError::NodeNotFound(id.clone()))?;
+                let schema = registry()
+                    .schema(&node.type_id)
+                    .ok_or_else(|| terrain_core::CoreError::UnknownNodeType(node.type_id.clone()))?;
+                let mut warnings = Vec::new();
+                if preset.node != schema.type_id {
+                    warnings.push(format!(
+                        "the preset is for {} nodes; settings this {} has were applied",
+                        preset.node, schema.label
+                    ));
+                }
+                let (values, more) = preset.values_for(schema);
+                warnings.extend(more);
+                for (key, value) in values {
+                    p.graph.set_param(registry(), &id, &key, value)?;
+                }
+                Ok((preset.name.clone(), warnings))
+            })
+        });
+        match result {
+            Ok((name, warnings)) => {
+                put(&mut d, "ok", true);
+                put(&mut d, "name", GString::from(name.as_str()));
+                let w: PackedStringArray = warnings.iter().map(|s| GString::from(s.as_str())).collect();
+                put(&mut d, "warnings", w);
+            }
+            Err(e) => {
+                self.fail(e.to_string());
+                put(&mut d, "ok", false);
+                put(&mut d, "error", GString::from(e.to_string().as_str()));
+            }
+        }
+        d
+    }
+
+    /// Node `id`'s current settings as a species preset file (YAML), named
+    /// `name`. Empty on error.
+    #[func]
+    fn make_species_preset(&mut self, id: GString, name: GString, biome: GString) -> GString {
+        let s = lock(&self.shared);
+        let Some(node) = s.project.graph.node(&id.to_string()) else {
+            drop(s);
+            self.fail(format!("no node {id}"));
+            return GString::new();
+        };
+        let Some(schema) = registry().schema(&node.type_id) else {
+            return GString::new();
+        };
+        SpeciesPreset::to_yaml(&name.to_string(), &biome.to_string(), schema, &node.params)
+            .as_str()
+            .into()
     }
 
     #[func]

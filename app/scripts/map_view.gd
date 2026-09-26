@@ -89,7 +89,8 @@ func fit() -> void:
 func _update_uniforms() -> void:
 	if _material == null:
 		return
-	var is_mask := _preview != null and _preview.get_port_type() == "mask"
+	# Points are shown as a mask of their positions.
+	var is_mask := _preview != null and _preview.get_port_type() in ["mask", "point_set"]
 	_material.set_shader_parameter("map_tex", _texture)
 	_material.set_shader_parameter("is_mask", is_mask)
 	_material.set_shader_parameter("is_color", _preview != null and _preview.get_port_type() == "color_map")
@@ -139,6 +140,8 @@ func readout_at(local: Vector2) -> String:
 	if _preview.get_port_type() == "color_map":
 		var c := _preview.sample_color(p.x, p.y)
 		text += "colour #%s   R %.2f  G %.2f  B %.2f" % [c.to_html(false), c.r, c.g, c.b]
+	elif _preview.get_port_type() == "point_set":
+		text += "%d points%s" % [_preview.get_point_count(), "   (point here)" if v > 0.0 else ""]
 	elif _preview.get_port_type() == "mask":
 		text += "mask %.3f" % v
 		var base := _preview.sample_base(p.x, p.y)

@@ -1,0 +1,23 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Tree fern understorey
+node: vegetation.shrubs
+biome: tropical
+description: Ferns and shade shrubs filling the damp rainforest floor under other trees.
+species: tropical_fern
+coverage: 0.9
+health: 0.85
+water_preference: 0.6
+spread_m: 10
+patches: 0.35
+patch_size_m: 50
+slope_max_deg: 40
+height_max_m: 1500
+avoid_peaks: 0.3
+snow_tolerance: 0
+occupied_mode: intermingle
+occupied_strength: 0.4
+dead_zones: 0.3
+spacing_m: 2.5
+scale_min: 0.6
+scale_max: 1.5

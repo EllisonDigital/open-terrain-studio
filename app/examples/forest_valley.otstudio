@@ -1,0 +1,473 @@
+{
+  "format_version": 1,
+  "app_version": "0.7.0",
+  "world": {
+    "size_m": [
+      6144,
+      6144
+    ],
+    "height_range_m": [
+      0,
+      2400
+    ],
+    "seed": 7007
+  },
+  "next_node_id": 11,
+  "nodes": [
+    {
+      "id": "n_0001",
+      "type": "terrain.mountain",
+      "type_version": 1,
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "height_m": 1500,
+        "radius_m": 2800,
+        "base_m": 60,
+        "roughness": 0.8
+      }
+    },
+    {
+      "id": "n_0002",
+      "type": "simulate.hydraulic",
+      "type_version": 1,
+      "pos": [
+        320,
+        0
+      ],
+      "params": {
+        "detail_m": 16
+      }
+    },
+    {
+      "id": "n_0003",
+      "type": "simulate.thermal",
+      "type_version": 1,
+      "pos": [
+        640,
+        0
+      ],
+      "params": {
+        "duration_s": 8,
+        "talus_angle_deg": 34
+      }
+    },
+    {
+      "id": "n_0004",
+      "type": "data.wetness",
+      "type_version": 1,
+      "pos": [
+        960,
+        -300
+      ],
+      "params": {
+        "reach_m": 120
+      }
+    },
+    {
+      "id": "n_0005",
+      "type": "simulate.snow",
+      "type_version": 1,
+      "pos": [
+        960,
+        300
+      ],
+      "params": {
+        "snow_line_m": 1300
+      }
+    },
+    {
+      "id": "n_0006",
+      "type": "vegetation.trees",
+      "type_version": 1,
+      "pos": [
+        1300,
+        -320
+      ],
+      "params": {
+        "species": "scots_pine",
+        "coverage": 0.8,
+        "water_preference": -0.2,
+        "spread_m": 25,
+        "patches": 0.35,
+        "patch_size_m": 180,
+        "slope_max_deg": 42,
+        "height_min_m": 600,
+        "height_max_m": 1350,
+        "height_falloff_m": 120,
+        "avoid_peaks": 0.3,
+        "snow_tolerance": 0.4,
+        "dead_zones": 0.4,
+        "dead_slope_deg": 44,
+        "spacing_m": 7,
+        "scale_min": 0.75,
+        "scale_max": 1.25
+      }
+    },
+    {
+      "id": "n_0007",
+      "type": "vegetation.trees",
+      "type_version": 1,
+      "pos": [
+        1300,
+        60
+      ],
+      "params": {
+        "species": "silver_birch",
+        "coverage": 0.75,
+        "health": 0.75,
+        "water_preference": 0.7,
+        "spread_m": 15,
+        "patches": 0.5,
+        "patch_size_m": 90,
+        "slope_max_deg": 30,
+        "height_max_m": 750,
+        "height_falloff_m": 100,
+        "avoid_peaks": 0.5,
+        "dead_zones": 0.4,
+        "spacing_m": 5,
+        "scale_min": 0.7,
+        "scale_max": 1.15
+      }
+    },
+    {
+      "id": "n_0008",
+      "type": "vegetation.shrubs",
+      "type_version": 1,
+      "pos": [
+        1660,
+        -120
+      ],
+      "params": {
+        "species": "hazel",
+        "coverage": 0.7,
+        "health": 0.7,
+        "water_preference": 0.3,
+        "patches": 0.5,
+        "patch_size_m": 60,
+        "slope_max_deg": 40,
+        "height_max_m": 1800,
+        "occupied_mode": "intermingle",
+        "occupied_strength": 0.8,
+        "dead_zones": 0.3,
+        "spacing_m": 3.5,
+        "scale_min": 0.6,
+        "scale_max": 1.3
+      }
+    },
+    {
+      "id": "n_0009",
+      "type": "vegetation.debris",
+      "type_version": 1,
+      "pos": [
+        1660,
+        360
+      ],
+      "params": {
+        "species": "boulder",
+        "coverage": 0.85,
+        "slope_min_deg": 34,
+        "reach_m": 80,
+        "dead_zone_weight": 0.8,
+        "spacing_m": 3,
+        "scale_min": 0.3,
+        "scale_max": 2.2
+      }
+    },
+    {
+      "id": "n_000a",
+      "type": "output.pack_masks",
+      "type_version": 1,
+      "pos": [
+        2020,
+        60
+      ],
+      "params": {}
+    }
+  ],
+  "links": [
+    {
+      "from": [
+        "n_0001",
+        "out"
+      ],
+      "to": [
+        "n_0002",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0002",
+        "height"
+      ],
+      "to": [
+        "n_0003",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "height"
+      ],
+      "to": [
+        "n_0004",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "height"
+      ],
+      "to": [
+        "n_0005",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "height"
+      ],
+      "to": [
+        "n_0006",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "height"
+      ],
+      "to": [
+        "n_0007",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "height"
+      ],
+      "to": [
+        "n_0008",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "height"
+      ],
+      "to": [
+        "n_0009",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0004",
+        "wetness"
+      ],
+      "to": [
+        "n_0006",
+        "water"
+      ]
+    },
+    {
+      "from": [
+        "n_0004",
+        "wetness"
+      ],
+      "to": [
+        "n_0007",
+        "water"
+      ]
+    },
+    {
+      "from": [
+        "n_0004",
+        "wetness"
+      ],
+      "to": [
+        "n_0008",
+        "water"
+      ]
+    },
+    {
+      "from": [
+        "n_0005",
+        "snow"
+      ],
+      "to": [
+        "n_0006",
+        "snow"
+      ]
+    },
+    {
+      "from": [
+        "n_0005",
+        "snow"
+      ],
+      "to": [
+        "n_0008",
+        "snow"
+      ]
+    },
+    {
+      "from": [
+        "n_0006",
+        "occupied"
+      ],
+      "to": [
+        "n_0007",
+        "occupied"
+      ]
+    },
+    {
+      "from": [
+        "n_0007",
+        "occupied"
+      ],
+      "to": [
+        "n_0008",
+        "occupied"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "debris"
+      ],
+      "to": [
+        "n_0009",
+        "talus"
+      ]
+    },
+    {
+      "from": [
+        "n_0006",
+        "dead_zones"
+      ],
+      "to": [
+        "n_0009",
+        "dead_zones"
+      ]
+    },
+    {
+      "from": [
+        "n_0006",
+        "density"
+      ],
+      "to": [
+        "n_000a",
+        "r"
+      ]
+    },
+    {
+      "from": [
+        "n_0007",
+        "density"
+      ],
+      "to": [
+        "n_000a",
+        "g"
+      ]
+    },
+    {
+      "from": [
+        "n_0008",
+        "density"
+      ],
+      "to": [
+        "n_000a",
+        "b"
+      ]
+    },
+    {
+      "from": [
+        "n_0009",
+        "density"
+      ],
+      "to": [
+        "n_000a",
+        "a"
+      ]
+    }
+  ],
+  "exports": [
+    {
+      "node": "n_0003",
+      "port": "height",
+      "format": "exr32"
+    },
+    {
+      "node": "n_0003",
+      "port": "height",
+      "format": "png16"
+    },
+    {
+      "node": "n_0006",
+      "port": "dead_zones",
+      "format": "png8"
+    },
+    {
+      "node": "n_0006",
+      "port": "density",
+      "format": "png8"
+    },
+    {
+      "node": "n_0006",
+      "port": "points",
+      "format": "csv"
+    },
+    {
+      "node": "n_0007",
+      "port": "density",
+      "format": "png8"
+    },
+    {
+      "node": "n_0007",
+      "port": "points",
+      "format": "csv"
+    },
+    {
+      "node": "n_0008",
+      "port": "density",
+      "format": "png8"
+    },
+    {
+      "node": "n_0008",
+      "port": "points",
+      "format": "csv"
+    },
+    {
+      "node": "n_0009",
+      "port": "density",
+      "format": "png8"
+    },
+    {
+      "node": "n_0009",
+      "port": "points",
+      "format": "csv"
+    },
+    {
+      "node": "n_000a",
+      "port": "out",
+      "format": "png8"
+    }
+  ],
+  "build": {
+    "resolution": 2049,
+    "folder": "output/forest_valley"
+  },
+  "ui": {
+    "viewed_node": "n_0008",
+    "viewed_port": "density",
+    "preview_resolution": 1024
+  }
+}

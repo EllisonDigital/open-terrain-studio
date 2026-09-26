@@ -18,6 +18,8 @@ pub mod import;
 pub mod node;
 pub mod ops;
 pub mod params;
+pub mod points;
+pub mod preset;
 pub mod project;
 pub mod seed;
 pub mod world;
@@ -31,6 +33,7 @@ pub use grid::{ColorGrid, Grid, GridSpec};
 pub use history::{EditState, History};
 pub use node::{EvalContext, Field, NodeKind, NodeRegistry, NodeSchema, Outputs, PortDef, PortType, Value};
 pub use params::{Curve, Gradient, ParamDef, ParamKind, ParamValue};
+pub use points::{Point, PointSet};
 pub use project::Project;
 pub use world::World;
 

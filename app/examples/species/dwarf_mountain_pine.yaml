@@ -1,0 +1,24 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Dwarf mountain pine
+node: vegetation.shrubs
+biome: alpine
+description: Creeping pine above the tree line, in thickets on scree and avalanche tracks.
+species: dwarf_mountain_pine
+coverage: 0.8
+health: 0.75
+water_preference: 0
+spread_m: 15
+patches: 0.55
+patch_size_m: 70
+slope_max_deg: 45
+height_min_m: 1400
+height_max_m: 2300
+height_falloff_m: 150
+avoid_peaks: 0.2
+snow_tolerance: 0.9
+dead_zones: 0.4
+dead_slope_deg: 45
+spacing_m: 3
+scale_min: 0.6
+scale_max: 1.4

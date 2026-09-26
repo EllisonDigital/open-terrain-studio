@@ -1,0 +1,22 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Creosote bush
+node: vegetation.shrubs
+biome: desert
+description: Evenly spaced desert shrub of flats and gentle alluvial fans.
+species: creosote_bush
+coverage: 0.6
+health: 0.65
+water_preference: 0.1
+spread_m: 5
+patches: 0.15
+patch_size_m: 200
+randomness: 0.4
+slope_max_deg: 20
+height_max_m: 1200
+avoid_peaks: 0.2
+snow_tolerance: 0
+dead_zones: 0.2
+spacing_m: 5
+scale_min: 0.6
+scale_max: 1.2

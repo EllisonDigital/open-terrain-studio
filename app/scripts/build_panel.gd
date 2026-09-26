@@ -11,6 +11,7 @@ signal builds_on_gpu_toggled(on: bool)
 const RESOLUTIONS := [512, 1009, 1024, 2017, 2048, 4033, 4096, 8129, 8192]
 const UNREAL_SIZES := [1009, 2017, 4033, 8129]
 const FORMATS := [["exr32", "EXR"], ["png16", "PNG 16"], ["png8", "PNG 8"]]
+const POINT_FORMATS := [["csv", "CSV"], ["json", "JSON"]]
 
 var project: TerrainProject
 ## Compute builds on the GPU (a machine setting, owned by the main window).
@@ -171,7 +172,7 @@ func _export_row(e: Dictionary) -> Control:
 	var out := _label("output '%s'" % port)
 	out.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	h.add_child(out)
-	for f in FORMATS:
+	for f in (POINT_FORMATS if e.get("type", "") == "point_set" else FORMATS):
 		var cb := CheckBox.new()
 		cb.text = f[1]
 		cb.button_pressed = formats.has(f[0])

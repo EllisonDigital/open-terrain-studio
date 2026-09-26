@@ -1,5 +1,5 @@
 //! Export writers: EXR 32-bit float, PNG 16 and 8-bit (grey, or RGBA for colour
-//! maps), and the `build.json` sidecar.
+//! maps), CSV and JSON for point sets, and the `build.json` sidecar.
 //!
 //! Image orientation: row 0 of every exported image is world Y = 0 and column 0
 //! is world X = 0 (top-left of the image = world origin). Unreal, Godot and
@@ -28,6 +28,10 @@ pub enum ExportFormat {
     /// Greyscale PNG, 8 bits, remapped like [`ExportFormat::Png16`] to 0..255.
     /// For masks and colour maps engines load directly.
     Png8,
+    /// Point sets as CSV: `x,y,z,rotation_deg,scale,species` per row.
+    Csv,
+    /// Point sets as JSON (same columns as CSV).
+    Json,
 }
 
 impl ExportFormat {
@@ -36,6 +40,8 @@ impl ExportFormat {
             "exr32" | "exr" => Some(Self::Exr32),
             "png16" | "png" => Some(Self::Png16),
             "png8" => Some(Self::Png8),
+            "csv" => Some(Self::Csv),
+            "json" => Some(Self::Json),
             _ => None,
         }
     }
@@ -44,7 +50,15 @@ impl ExportFormat {
             Self::Exr32 => "exr32",
             Self::Png16 => "png16",
             Self::Png8 => "png8",
+            Self::Csv => "csv",
+            Self::Json => "json",
         }
+    }
+
+    /// Whether this format can hold data of type `ty`: images for grids,
+    /// CSV and JSON for point sets.
+    pub fn supports(self, ty: PortType) -> bool {
+        matches!(self, Self::Csv | Self::Json) == (ty == PortType::PointSet)
     }
     /// File name ending, e.g. .png; 8-bit PNGs end _8bit.png so they
     /// don't overwrite a 16-bit PNG of the same output.
@@ -53,6 +67,8 @@ impl ExportFormat {
             Self::Exr32 => "exr",
             Self::Png16 => "png",
             Self::Png8 => "8bit.png",
+            Self::Csv => "csv",
+            Self::Json => "json",
         }
     }
 }
@@ -67,10 +83,20 @@ pub struct ExportedFile {
     pub format: ExportFormat,
     /// What stored values mean: e.g. "metres" or "normalised to height_range_m".
     pub encoding: String,
-    /// Actual min/max of the exported data, in its natural unit (metres or 0..1).
+    /// Actual min/max of the exported data, in its natural unit (metres or
+    /// 0..1; point heights for point sets).
     pub data_min: f32,
     pub data_max: f32,
+    /// Point sets only: how many points the file lists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub points: Option<usize>,
+    /// Point sets only: the species names used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub species: Option<Vec<String>>,
 }
+
+/// What point files store, as written to `build.json`.
+pub const POINTS_ENCODING: &str = "x,y metres from the world origin (row 0 / column 0 corner); z metres; rotation_deg about vertical (0 = +X, 90 = +Y); scale; species";
 
 /// Contents of the `build.json` sidecar written next to exported files.
 #[derive(Clone, Debug, Serialize)]
@@ -147,13 +173,40 @@ pub fn write_value(
     node: &str,
     port: &str,
 ) -> Result<ExportedFile> {
+    let ty = value.port_type();
+    if !format.supports(ty) {
+        return Err(CoreError::Project(format!(
+            "{node}.{port}: {} can't be written as {}",
+            ty.key(),
+            format.key()
+        )));
+    }
+    if let Some(points) = value.points() {
+        let text = match format {
+            ExportFormat::Csv => points.to_csv(),
+            _ => points.to_json(),
+        };
+        std::fs::write(path, text)?;
+        let (lo, hi) = points.z_range();
+        return Ok(ExportedFile {
+            file: file_name(path),
+            node: node.into(),
+            port: port.into(),
+            data: ty,
+            format,
+            encoding: POINTS_ENCODING.into(),
+            data_min: lo,
+            data_max: hi,
+            points: Some(points.len()),
+            species: Some(points.species.clone()),
+        });
+    }
     let (lo, hi) = value
         .samples()
         .iter()
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| {
             (lo.min(v), hi.max(v))
         });
-    let ty = value.port_type();
     let encoding = match (format, ty) {
         (ExportFormat::Exr32, PortType::Heightfield) => "metres",
         (ExportFormat::Exr32, PortType::Mask) => "0..1",
@@ -164,6 +217,7 @@ pub fn write_value(
         (ExportFormat::Png8, PortType::Heightfield) => "0..255 = height_range_m min..max",
         (ExportFormat::Png8, PortType::Mask) => "0..255 = 0..1",
         (ExportFormat::Png8, PortType::ColorMap) => "RGBA, sRGB, 0..255 = 0..1",
+        _ => unreachable!("checked by ExportFormat::supports"),
     }
     .to_string();
     if let Some(color) = value.color() {
@@ -171,6 +225,7 @@ pub fn write_value(
             ExportFormat::Exr32 => write_exr32_rgba(color, path)?,
             ExportFormat::Png16 => write_png_rgba(color, true, path)?,
             ExportFormat::Png8 => write_png_rgba(color, false, path)?,
+            ExportFormat::Csv | ExportFormat::Json => unreachable!(),
         }
     } else {
         let grid = value.grid();
@@ -182,13 +237,11 @@ pub fn write_value(
             ExportFormat::Exr32 => write_exr32(grid, path)?,
             ExportFormat::Png16 => write_png16(&normalised(), path)?,
             ExportFormat::Png8 => write_png8(&normalised(), path)?,
+            ExportFormat::Csv | ExportFormat::Json => unreachable!(),
         }
     }
     Ok(ExportedFile {
-        file: path
-            .file_name()
-            .map(|f| f.to_string_lossy().into_owned())
-            .unwrap_or_default(),
+        file: file_name(path),
         node: node.into(),
         port: port.into(),
         data: ty,
@@ -196,7 +249,15 @@ pub fn write_value(
         encoding,
         data_min: lo,
         data_max: hi,
+        points: None,
+        species: None,
     })
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|f| f.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// Write a single-channel 32-bit float EXR (channel `Y`).
@@ -422,6 +483,25 @@ fn write_outputs(
 ) -> Result<Vec<PathBuf>> {
     let spec = GridSpec::full_world(&project.world, resolution)?;
     let folder = resolve_folder(folder, opts.base_dir)?;
+    // Refuse mismatched formats (e.g. a heightfield as CSV) before computing anything.
+    for (node, port, formats) in outputs {
+        let ty = project
+            .graph
+            .node(node)
+            .and_then(|n| registry.schema(&n.type_id))
+            .and_then(|s| s.output(port))
+            .map(|o| o.ty);
+        if let Some(ty) = ty
+            && let Some(f) = formats.iter().find(|f| !f.supports(ty))
+        {
+            return Err(CoreError::Project(format!(
+                "{node}.{port} is a {} and can't be exported as {}",
+                ty.key().replace('_', " "),
+                f.key()
+            )));
+        }
+    }
+
     // Evaluate everything before writing anything, so a failure leaves no
     // half-finished build behind.
     let n = outputs.len() as f32;

@@ -306,6 +306,13 @@ impl Graph {
         )
     }
 
+    /// Vegetation and debris nodes whose points to draw with `id`'s output in
+    /// the 3D view: `id` and every node upstream with a `points` PointSet
+    /// output (e.g. earlier populations feeding an Occupied input), in id order.
+    pub fn vegetation_sources(&self, registry: &NodeRegistry, id: &str) -> Vec<NodeId> {
+        self.upstream_with(registry, id, &[("points", crate::node::PortType::PointSet)])
+    }
+
     /// Nodes that put snow on the terrain `id` produces, for drawing it in the
     /// 3D view: `id` and every node upstream with a `height` Heightfield and a
     /// `snow` Mask output (Snow), in id order.

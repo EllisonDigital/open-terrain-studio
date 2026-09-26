@@ -32,6 +32,7 @@
   "noise.value": "3200fbc4a9b20393",
   "noise.voronoi": "9125f83c059a3e1e",
   "output.normal_map": "0534135f098f78fc",
+  "output.pack_masks": "9c98d7e5b4c80465",
   "output.splat": "3ced37ae5cb8a4a5",
   "portal.height": "5ed5a6bb658b1611",
   "portal.mask": "68aa5284659a62cf",
@@ -52,5 +53,9 @@
   "terrain.dunes": "16cfa475e283cfc9",
   "terrain.mountain": "4f3064be29acd519",
   "terrain.plateau": "cb989114ec5c8f95",
-  "terrain.ridge": "cd36bbde309ffa2f"
+  "terrain.ridge": "cd36bbde309ffa2f",
+  "vegetation.debris": "37857e47886ffe16",
+  "vegetation.grass": "2bd939428ac79c04",
+  "vegetation.shrubs": "e5577574ac75cbc0",
+  "vegetation.trees": "c607484a48e3dccc"
 }

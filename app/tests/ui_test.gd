@@ -1,6 +1,7 @@
 ## Drives the real main window: waits for the first preview, edits a
 ## parameter, adds a node, saves, reloads and exports, then the v0.2 tools:
-## undo/redo, examples, the 2D map, mask overlays and ports, and Build.
+## undo/redo, examples, the 2D map, mask overlays and ports, Build, and
+## vegetation (plants, data view, presets, point export).
 ## Takes screenshots along the way.
 ## Needs a display (or xvfb) and a GPU (or lavapipe):
 ##   xvfb-run godot --path app --script res://tests/ui_test.gd -- <screenshot_dir>
@@ -186,7 +187,7 @@ func run() -> void:
 		await shot("10_example_%d_3d" % i)
 
 	# Water: the River coast example draws its sea, lakes and rivers.
-	main._open_example(main.EXAMPLES.size() - 1)
+	main._open_example(_example_index(main, "River coast"))
 	check(await wait_preview(main), "river coast previews")
 	check(main.view._water.visible, "water drawn over the river coast")
 	main._view_node("n_0005")
@@ -196,6 +197,43 @@ func run() -> void:
 	main._output_picker.item_selected.emit(2)
 	check(await wait_preview(main), "sea mask")
 	check(not main.view._water.visible, "no water over a mask")
+
+	# Vegetation: the Forest valley example opens on its shrubs, with the
+	# pine and birch upstream drawn as plants.
+	main._open_example(_example_index(main, "Forest valley — vegetation"))
+	check(await wait_preview(main), "forest valley previews")
+	check(main.viewed_id == "n_0008" and main._viewed_port() == "density", "opens on the shrub density")
+	check(main.view.get_plant_instance_count() > 1000, "plants drawn: %d" % main.view.get_plant_instance_count())
+	check(main._stats_label.text.contains("plants"), "stats count plants: " + main._stats_label.text)
+	main.view.set_camera_state({"yaw": -0.7, "pitch": -0.3, "distance": 260.0, "target": [-1900.0, 120.0, 1500.0]})
+	await frames(10)
+	await shot("17_vegetation_3d")
+	main.view.frame_all()
+	main.graph_panel.select_node("n_0006")
+	main._view_node("n_0006")
+	check(await wait_preview(main), "pine preview")
+	var preset_rows: Array = main.inspector.find_children("*", "Label", true, false).filter(func(l): return l.text == "Species preset")
+	check(preset_rows.size() == 1, "Trees inspector offers species presets")
+	var species_edit: Array = main.inspector.find_children("*", "LineEdit", true, false).filter(func(e): return e.text == "scots_pine")
+	check(species_edit.size() == 1, "species name editable as text")
+	main._data_view_toggle.button_pressed = true
+	check(await wait_preview(main), "data view preview")
+	check(main._last_preview.is_data_view() and main._stats_label.text.contains("data view"), "data view: " + main._stats_label.text)
+	await frames(10)
+	await shot("18_vegetation_data_view")
+	main._data_view_toggle.button_pressed = false
+	check(await wait_preview(main), "data view off")
+	# The example marks the pine points as CSV: unmark and mark them again.
+	main._select_output("points")
+	check(await wait_preview(main), "points preview")
+	check(main._stats_label.text.contains("points"), "points stats: " + main._stats_label.text)
+	main._on_menu(main.Menu.MARK_EXPORT)
+	check(main.project.get_export_formats("n_0006", "points").is_empty(), "points unmarked")
+	main._on_menu(main.Menu.MARK_EXPORT)
+	check(Array(main.project.get_export_formats("n_0006", "points")) == ["csv"], "points marked as CSV")
+	var export_boxes: Array = main.inspector.find_children("*", "CheckBox", true, false).map(func(c): return c.text)
+	check(export_boxes.has("CSV") and export_boxes.has("JSON"), "point export formats offered")
+	main._message.hide()
 
 	# Erosion: pick each output of Hydraulic Erosion from the toolbar.
 	main._open_example(3)
@@ -296,3 +334,10 @@ func run() -> void:
 
 	print("FAILED: %d" % failures if failures else "ALL PASSED")
 	quit(1 if failures else 0)
+
+
+func _example_index(main, name: String) -> int:
+	for i in main.EXAMPLES.size():
+		if main.EXAMPLES[i][0] == name:
+			return i
+	return -1

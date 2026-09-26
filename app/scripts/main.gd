@@ -23,6 +23,7 @@ const EXAMPLES := [
 	["Eroded strata", "res://examples/eroded_strata.otstudio"],
 	["Asterfall Crown — Hero World", "res://examples/asterfall_crown.otstudio"],
 	["River coast", "res://examples/river_coast.otstudio"],
+	["Forest valley — vegetation", "res://examples/forest_valley.otstudio"],
 ]
 
 enum Menu { NEW, OPEN, SAVE, SAVE_AS, EXPORT, QUIT, WORLD, DOCS, ABOUT, UNDO, REDO, MARK_EXPORT, BUILD,
@@ -82,6 +83,7 @@ var _lock_preview_button: Button
 var _preview_stale := false
 var _gpu_label: Label
 var _gpu_state := ""
+var _data_view_toggle: CheckBox
 
 
 func _ready() -> void:
@@ -231,6 +233,7 @@ func _build_ui() -> void:
 	inspector.port_toggled.connect(_on_port_toggled)
 	inspector.export_toggled.connect(_on_export_toggled)
 	inspector.send_to_colour.connect(_send_to_colour)
+	inspector.species_preset_chosen.connect(_apply_species_preset)
 	inspector.world_changed.connect(_on_world_changed)
 	side_tabs.add_child(inspector)
 	build_panel = BuildPanel.new()
@@ -352,6 +355,21 @@ func _build_view_toolbar() -> Control:
 	sun.tooltip_text = "Sun direction"
 	sun.value_changed.connect(func(v): view.set_sun_angle(v, 38.0))
 	bar.add_child(sun)
+
+	var plants := CheckBox.new()
+	plants.text = "Plants"
+	plants.button_pressed = true
+	plants.tooltip_text = "Draw vegetation points as placeholder shapes at real size (when viewing a vegetation node).\nAt most %d are drawn; exports contain every point." % TerrainView.MAX_VEGETATION
+	plants.toggled.connect(func(on): view.set_show_plants(on))
+	bar.add_child(plants)
+
+	_data_view_toggle = CheckBox.new()
+	_data_view_toggle.text = "Data view"
+	_data_view_toggle.tooltip_text = "Show a vegetation population's ecosystem forces as colours:\nred = dead zones, green = density, blue = water influence."
+	_data_view_toggle.toggled.connect(func(on):
+		builder.set_data_view(on)
+		_request_preview())
+	bar.add_child(_data_view_toggle)
 
 	var frame := Button.new()
 	frame.text = "Frame (F)"
@@ -605,6 +623,13 @@ func _viewed_port() -> String:
 	return outputs[0]["key"] if outputs.size() > 0 else ""
 
 
+func _port_type_of(id: String, port: String) -> String:
+	for o in _outputs_of(id):
+		if o["key"] == port:
+			return o["type"]
+	return ""
+
+
 func _outputs_of(id: String) -> Array:
 	for n in graph.get_nodes():
 		if n["id"] == id:
@@ -750,6 +775,11 @@ func _send_to_colour(node_id: String, port: String) -> void:
 func _on_export_toggled(node_id: String, port: String, format: String, on: bool) -> void:
 	if not project.set_export(node_id, port, format, on):
 		_set_status(project.get_last_error())
+	_export_marks_changed(node_id)
+
+
+## Redraw everything that shows export marks.
+func _export_marks_changed(node_id: String) -> void:
 	graph_panel.rebuild()
 	build_panel.refresh()
 	if inspector.get_node_id() == node_id:
@@ -824,7 +854,11 @@ func _on_preview_ready(preview: TerrainPreview) -> void:
 	else:
 		view.show_preview(preview)
 	var span_text := "%.0f – %.0f m" % [preview.get_min(), preview.get_max()]
-	if preview.get_port_type() == "color_map":
+	if preview.is_data_view():
+		span_text = "data view: red = dead zones, green = density, blue = water"
+	elif preview.get_port_type() == "point_set":
+		span_text = "%d points" % preview.get_point_count()
+	elif preview.get_port_type() == "color_map":
 		span_text = "colour"
 		if preview.get_base_node_id() != "":
 			span_text += " on %s" % preview.get_base_node_id()
@@ -832,6 +866,10 @@ func _on_preview_ready(preview: TerrainPreview) -> void:
 		span_text = "mask %.2f – %.2f" % [preview.get_min(), preview.get_max()]
 		if preview.get_base_node_id() != "":
 			span_text += " on %s" % preview.get_base_node_id()
+	var plants := preview.get_vegetation_count()
+	if plants > 0 and not view_2d:
+		var shown: int = view.get_plant_instance_count()
+		span_text += "  ·  %s plants%s" % [_thousands(plants), "" if shown >= plants else " (%s drawn)" % _thousands(shown)]
 	var n := preview.get_computed_nodes()
 	_stats_label.text = "%d²  ·  %s  ·  %s, %.0f ms" % [
 		preview.get_resolution(), span_text,
@@ -850,12 +888,41 @@ func _on_preview_failed(_generation: int, message: String) -> void:
 	_set_status("⚠ " + message)
 
 
+func _thousands(n: int) -> String:
+	var s := str(n)
+	var out := ""
+	while s.length() > 3:
+		out = "," + s.substr(s.length() - 3) + out
+		s = s.substr(0, s.length() - 3)
+	return s + out
+
+
+## Apply a species preset (YAML text) to a vegetation node.
+func _apply_species_preset(node_id: String, text: String) -> void:
+	var result: Dictionary = graph.apply_species_preset(node_id, text)
+	if not result["ok"]:
+		_show_message("Species preset", "Could not apply the preset:\n" + result["error"])
+		return
+	_show_inspector_for(node_id)
+	_update_title()
+	_terrain_edited()
+	var warnings: PackedStringArray = result["warnings"]
+	if warnings.is_empty():
+		_set_status("Applied the %s preset." % result["name"])
+	else:
+		_set_status("Applied the %s preset (%s)." % [result["name"], "; ".join(warnings)])
+
+
 func _start_export() -> void:
 	var formats := PackedStringArray()
-	if _export_exr.button_pressed:
-		formats.append("exr32")
-	if _export_png.button_pressed:
-		formats.append("png16")
+	if _last_preview != null and _last_preview.get_port_type() == "point_set":
+		# Points export as files of points whatever the image formats ticked.
+		formats.append_array(["csv", "json"])
+	else:
+		if _export_exr.button_pressed:
+			formats.append("exr32")
+		if _export_png.button_pressed:
+			formats.append("png16")
 	var folder := _export_folder.text.strip_edges()
 	if formats.is_empty() or folder == "":
 		_show_message("Export", "Choose at least one format and a folder.")
@@ -939,13 +1006,18 @@ func _on_menu(id: int) -> void:
 			var port := _viewed_port()
 			var marked := not project.get_export_formats(viewed_id, port).is_empty()
 			project.begin_edit_group("Unmark for export" if marked else "Mark for export")
-			# Colour maps are marked as 8-bit PNG (what engines load), the rest as EXR + 16-bit PNG.
-			var is_color := _last_preview != null and _last_preview.get_port_type() == "color_map"
-			var mark_formats := ["png8"] if is_color else ["exr32", "png16"]
-			for f in ["exr32", "png16", "png8"]:
+			# Colour maps are marked as 8-bit PNG (what engines load), points as
+			# CSV, the rest as EXR + 16-bit PNG.
+			var type := _port_type_of(viewed_id, port)
+			var mark_formats := ["exr32", "png16"]
+			if type == "color_map":
+				mark_formats = ["png8"]
+			elif type == "point_set":
+				mark_formats = ["csv"]
+			for f in ["exr32", "png16", "png8", "csv", "json"]:
 				project.set_export(viewed_id, port, f, not marked and f in mark_formats)
 			project.end_edit_group()
-			_on_export_toggled(viewed_id, port, "exr32", not marked)
+			_export_marks_changed(viewed_id)
 			_set_status("%s %s for export." % ["Unmarked" if marked else "Marked", viewed_id])
 		Menu.BUILD:
 			side_tabs.current_tab = build_panel.get_index()

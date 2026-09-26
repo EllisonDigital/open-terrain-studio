@@ -1,0 +1,17 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Scree and boulders
+node: vegetation.debris
+biome: alpine
+description: Rockfall collecting below cliffs and in avalanche dead zones.
+species: boulder
+coverage: 0.85
+slope_min_deg: 34
+reach_m: 80
+talus_weight: 1
+dead_zone_weight: 0.8
+patches: 0.4
+patch_size_m: 40
+spacing_m: 3
+scale_min: 0.3
+scale_max: 2.2

@@ -193,6 +193,31 @@ All colour work lives in the dedicated **Colour** tab (ARCHITECTURE.md §5). Ter
 
 **Goal:** Gaea-style ecosystem populations with density masks and point export (ARCHITECTURE.md §8).
 
+**Status (26 Sep 2026):** built on the `v0.7-vegetation` branch; not merged or released. Details, methods and
+limits are in [vegetation.md](vegetation.md).
+
+- *Done and tested:*
+  - Trees, Shrubs and Grass populations: growth/health, inhibitors and dead zones, with Water, Snow,
+    Allowed-area and Occupied inputs. They output Density, Points, Dead zones, Occupied and Water influence.
+  - Occupied chaining in three modes: avoid, intermingle and grow near.
+  - Poisson-disk points on a world-fixed cell grid, with random rotation and scale.
+  - Debris / Rocks, driven by talus (Thermal Erosion's Debris output, or steep ground) and dead zones.
+  - Pack Masks (RGBA).
+  - A `PointSet` port type; CSV and JSON point export, listed in `build.json`.
+  - 17 YAML species presets (temperate, alpine, desert, tropical) with apply, load and save in the inspector.
+  - MultiMesh placeholder plants in the 3D view, capped at 150,000, and the ecosystem data view.
+  - The *Forest valley* example; *Asterfall Crown* gained the same chain.
+- *Exit criteria:*
+  - *Forest valley* chains pine, birch and shrubs. In the tests, pine points average over 300 m above birch
+    points, and under 12% of birch cover overlaps pine.
+  - 2.5 million points generate in 0.41 s.
+  - `app/tests/vegetation_test.gd` exports the points as CSV, places them with the Godot import convention in
+    [vegetation.md](vegetation.md), and every point lands within 1 mm of the app's preview.
+  - The Unreal placement is documented from the landscape conventions in the export guides but hasn't been
+    checked in Unreal. Mesh-scattering importers for Blender, Godot and Unreal are part of the import helpers.
+- *Limits:* vegetation runs on the CPU only. Points are sampled per build grid, so tiled builds (v0.8) will need
+  a margin. Point counts depend a little on the resolution, because slopes do.
+
 **Deliverables**
 
 - Trees, Shrubs and Grass population nodes with growth/health, inhibitors and dead zones.

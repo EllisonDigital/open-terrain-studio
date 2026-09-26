@@ -9,6 +9,16 @@ const WATER_SHADER := preload("res://shaders/water.gdshader")
 ## Mesh vertices per side are capped; the fragment shader samples the full
 ## heightmap for lighting, so detail survives at higher preview resolutions.
 const MAX_MESH_RES := 1024
+## Most vegetation instances drawn at once; larger point sets are thinned
+## evenly (exports always contain every point).
+const MAX_VEGETATION := 150_000
+## Colours of the placeholder shapes, by kind.
+const PLANT_COLOURS := {
+	"tree": Color(0.16, 0.34, 0.14),
+	"shrub": Color(0.33, 0.45, 0.18),
+	"grass": Color(0.55, 0.66, 0.28),
+	"rock": Color(0.52, 0.50, 0.47),
+}
 
 var world_size := 8192.0
 var height_min := 0.0
@@ -29,6 +39,11 @@ var _snow_texture: ImageTexture
 var _color_texture: ImageTexture
 var _mesh_res := 0
 var _exaggeration := 1.0
+## Vegetation layers shown (from TerrainPreview.get_vegetation) and their instances.
+var _vegetation: Array = []
+var _plant_nodes: Array[MultiMeshInstance3D] = []
+var _plant_meshes := {}
+var show_plants := true
 
 # Orbit camera state.
 var yaw := deg_to_rad(-35.0)
@@ -132,7 +147,8 @@ func show_preview(preview: TerrainPreview) -> void:
 	if img == null:
 		return
 	var type := preview.get_port_type()
-	var is_mask := type == "mask"
+	# Points are drawn as plants, over the density-style mask of their positions.
+	var is_mask := type == "mask" or type == "point_set"
 	var is_color := type == "color_map"
 	var is_height := not is_mask and not is_color
 	var base: Image = null if is_height else preview.get_base_image()
@@ -162,6 +178,136 @@ func show_preview(preview: TerrainPreview) -> void:
 	_terrain.visible = true
 	_show_water(preview.get_water_image() if is_height else null)
 	_show_snow(preview.get_snow_image() if is_height else null)
+	show_vegetation(preview.get_vegetation(MAX_VEGETATION))
+
+
+## Draw vegetation points (TerrainPreview.get_vegetation) as placeholder
+## shapes at their real size: cones for trees, balls for shrubs, tufts for
+## grass, flattened lumps for rocks.
+func show_vegetation(layers: Array) -> void:
+	_vegetation = layers
+	_rebuild_plants()
+
+
+## Instances drawn now (after thinning), for tests and the status bar.
+func get_plant_instance_count() -> int:
+	var n := 0
+	for mmi in _plant_nodes:
+		if mmi.visible:
+			n += mmi.multimesh.instance_count
+	return n
+
+
+func set_show_plants(on: bool) -> void:
+	show_plants = on
+	for mmi in _plant_nodes:
+		mmi.visible = on
+
+
+func _plant_mesh(kind: String) -> Mesh:
+	if _plant_meshes.has(kind):
+		return _plant_meshes[kind]
+	var mesh: PrimitiveMesh
+	var lift := 0.0
+	match kind:
+		"tree":
+			var cone := CylinderMesh.new()
+			cone.top_radius = 0.0
+			cone.bottom_radius = 2.2
+			cone.height = 10.0
+			cone.radial_segments = 7
+			cone.rings = 1
+			mesh = cone
+			lift = 5.0
+		"shrub":
+			var ball := SphereMesh.new()
+			ball.radius = 1.2
+			ball.height = 1.8
+			ball.radial_segments = 7
+			ball.rings = 3
+			mesh = ball
+			lift = 0.7
+		"grass":
+			var tuft := CylinderMesh.new()
+			tuft.top_radius = 0.05
+			tuft.bottom_radius = 0.35
+			tuft.height = 0.7
+			tuft.radial_segments = 4
+			tuft.rings = 1
+			mesh = tuft
+			lift = 0.35
+		_:
+			var lump := SphereMesh.new()
+			lump.radius = 0.8
+			lump.height = 0.9
+			lump.radial_segments = 5
+			lump.rings = 2
+			mesh = lump
+			lift = 0.2
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = PLANT_COLOURS.get(kind, PLANT_COLOURS["rock"])
+	mat.vertex_color_use_as_albedo = true
+	mat.roughness = 0.9
+	mesh.material = mat
+	# Base of the shape at the point: shift the vertices up.
+	var arrays := mesh.get_mesh_arrays()
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	for i in verts.size():
+		verts[i].y += lift
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	var shifted := ArrayMesh.new()
+	shifted.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	shifted.surface_set_material(0, mat)
+	_plant_meshes[kind] = shifted
+	return shifted
+
+
+func _rebuild_plants() -> void:
+	for mmi in _plant_nodes:
+		mmi.queue_free()
+	_plant_nodes.clear()
+	var half := world_size * 0.5
+	for li in _vegetation.size():
+		var layer: Dictionary = _vegetation[li]
+		var pts: PackedFloat32Array = layer["points"]
+		var count := pts.size() / 5
+		if count == 0:
+			continue
+		var kind: String = layer["kind"]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		mm.mesh = _plant_mesh(kind)
+		mm.instance_count = count
+		# 12 transform floats (basis rows with origin) + 4 colour floats per instance.
+		var buf := PackedFloat32Array()
+		buf.resize(count * 16)
+		# Layers of the same kind get slightly different shades.
+		var shade := 1.0 - 0.12 * float(li % 3)
+		for i in count:
+			var o := i * 5
+			var x := pts[o] - half
+			var z := pts[o + 1] - half
+			var y := pts[o + 2] * _exaggeration
+			# 0° = +X, 90° = +Y (world) = +Z here: a turn of -angle about Godot's Y.
+			var a := -deg_to_rad(pts[o + 3])
+			var s := pts[o + 4]
+			var c := cos(a) * s
+			var n := sin(a) * s
+			var b := i * 16
+			buf[b] = c; buf[b + 1] = 0.0; buf[b + 2] = n; buf[b + 3] = x
+			buf[b + 4] = 0.0; buf[b + 5] = s; buf[b + 6] = 0.0; buf[b + 7] = y
+			buf[b + 8] = -n; buf[b + 9] = 0.0; buf[b + 10] = c; buf[b + 11] = z
+			var v := shade * (0.85 + 0.3 * fposmod(pts[o] * 0.137 + pts[o + 1] * 0.071, 1.0))
+			buf[b + 12] = v; buf[b + 13] = v; buf[b + 14] = v; buf[b + 15] = 1.0
+		mm.buffer = buf
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if kind == "tree" \
+				else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mmi.visible = show_plants
+		_viewport.add_child(mmi)
+		_plant_nodes.append(mmi)
 
 
 ## Snow cover from Snow nodes on the terrain shown (null: none).
@@ -193,6 +339,7 @@ func _update_texture(tex: ImageTexture, img: Image) -> ImageTexture:
 func clear() -> void:
 	_terrain.visible = false
 	_water.visible = false
+	show_vegetation([])
 
 
 func set_view_mode(mode: int) -> void:
@@ -205,6 +352,8 @@ func set_exaggeration(value: float) -> void:
 	_water_material.set_shader_parameter("exaggeration", value)
 	_terrain.set_custom_aabb(_terrain_aabb(value))
 	_water.set_custom_aabb(_terrain_aabb(value))
+	if not _vegetation.is_empty():
+		_rebuild_plants()
 
 
 func set_sun_angle(azimuth_deg: float, elevation_deg: float) -> void:
