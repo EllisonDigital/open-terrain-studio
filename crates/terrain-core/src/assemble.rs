@@ -1,4 +1,4 @@
-//! Putting tiled builds back together on disk, and writing images from them
+//! Putting tiled                             out.extend(bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)));ytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)),uilds back together on disk, and writing images from them
 //! a band of rows at a time, so a build never holds a whole-world image in
 //! memory.
 
@@ -55,7 +55,7 @@ pub fn file_tiles(width: u32, height: u32, size: u32) -> Vec<([u32; 2], Rect)> {
 
 /// Whether every file tile of an `n`-sample side has `size` samples.
 pub fn tiles_even(n: u32, size: u32) -> bool {
-    size >= 2 && n >= size && (n - 1) % (size - 1) == 0
+    size >= 2 && n >= size && (n - 1).is_multiple_of(size - 1)
 }
 
 /// A whole-build image of `channels` f32 values per sample, kept in a
@@ -119,11 +119,7 @@ impl RawImage {
         for y in rect.y0..rect.y0 + rect.h {
             file.seek(SeekFrom::Start(self.offset(rect.x0, y)))?;
             file.read_exact(&mut bytes)?;
-            out.extend(
-                bytes
-                    .chunks_exact(4)
-                    .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])),
-            );
+            out.extend(bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)));
         }
         Ok(out)
     }
