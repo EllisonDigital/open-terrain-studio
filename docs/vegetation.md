@@ -143,7 +143,9 @@ water_preference: -0.2
 - At most 150,000 are drawn. Each node gets an equal share, trees first, and a node that needs fewer passes the
   rest on. A thinned node keeps every n-th point.
 - The status bar shows the total and how many are drawn.
-- Viewing a **Points** output shows each point as a white dot on the mask overlay, and its count.
+- In the 3D view a vegetation node shows only its plants on the terrain. Tick **Weight map** to colour the ground
+  under them with the viewed output (density, or a white dot per point for **Points**). The 2D view always shows it.
+- Viewing a **Points** output shows its count in the status bar.
 - **Data view** shows a population's ecosystem forces as colours over the terrain: red = dead zones,
   green = density, blue = water influence.
 

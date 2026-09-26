@@ -44,6 +44,9 @@ var _vegetation: Array = []
 var _plant_nodes: Array[MultiMeshInstance3D] = []
 var _plant_meshes := {}
 var show_plants := true
+## Paint a point set's density mask on the terrain under its plants.
+var show_weight_map := false
+var _preview: TerrainPreview
 
 # Orbit camera state.
 var yaw := deg_to_rad(-35.0)
@@ -140,14 +143,16 @@ func set_world(size_m: float, h_min: float, h_max: float) -> void:
 ## Show a TerrainPreview. Heightfields are shown as terrain. Masks are drawn
 ## as a false-colour overlay on the terrain they were computed from; a mask
 ## with no terrain upstream is shown as relief over the world height range.
+## A vegetation node's outputs are drawn as its plants on their terrain, with
+## the mask (its weight map) under them only when show_weight_map is on.
 ## Colour maps are painted on the terrain they were computed from (flat
 ## ground if there is none).
 func show_preview(preview: TerrainPreview) -> void:
 	var img: Image = preview.get_image()
 	if img == null:
 		return
+	_preview = preview
 	var type := preview.get_port_type()
-	# Points are drawn as plants, over the density-style mask of their positions.
 	var is_mask := type == "mask" or type == "point_set"
 	var is_color := type == "color_map"
 	var is_height := not is_mask and not is_color
@@ -164,8 +169,10 @@ func show_preview(preview: TerrainPreview) -> void:
 	else:
 		_material.set_shader_parameter("value_scale", 1.0)
 		_material.set_shader_parameter("value_offset", 0.0)
-	_material.set_shader_parameter("show_overlay", is_mask)
-	if is_mask:
+	var layers: Array = preview.get_vegetation(MAX_VEGETATION)
+	var overlay := is_mask and (show_weight_map or base == null or not _has_plants_of(layers, preview.get_node_id()))
+	_material.set_shader_parameter("show_overlay", overlay)
+	if overlay:
 		_overlay = _update_texture(_overlay, img)
 		_material.set_shader_parameter("overlay_tex", _overlay)
 	_material.set_shader_parameter("show_color", is_color)
@@ -178,7 +185,12 @@ func show_preview(preview: TerrainPreview) -> void:
 	_terrain.visible = true
 	_show_water(preview.get_water_image() if is_height else null)
 	_show_snow(preview.get_snow_image() if is_height else null)
-	show_vegetation(preview.get_vegetation(MAX_VEGETATION))
+	show_vegetation(layers)
+
+
+## Whether the layers include the plants of the node being viewed.
+func _has_plants_of(layers: Array, node_id: String) -> bool:
+	return layers.any(func(l): return l["node"] == node_id)
 
 
 ## Draw vegetation points (TerrainPreview.get_vegetation) as placeholder
@@ -336,7 +348,19 @@ func _update_texture(tex: ImageTexture, img: Image) -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 
+## Show or hide the weight map under a vegetation node's plants.
+func set_show_weight_map(on: bool) -> void:
+	show_weight_map = on
+	if _preview != null:
+		show_preview(_preview)
+
+
+func is_overlay_shown() -> bool:
+	return _material.get_shader_parameter("show_overlay")
+
+
 func clear() -> void:
+	_preview = null
 	_terrain.visible = false
 	_water.visible = false
 	show_vegetation([])

@@ -368,6 +368,12 @@ func _build_view_toolbar() -> Control:
 	plants.toggled.connect(func(on): view.set_show_plants(on))
 	bar.add_child(plants)
 
+	var weight_map := CheckBox.new()
+	weight_map.text = "Weight map"
+	weight_map.tooltip_text = "Colour the ground under a vegetation node's plants by the density of its points (3D view).\nThe 2D view always shows it."
+	weight_map.toggled.connect(func(on): view.set_show_weight_map(on))
+	bar.add_child(weight_map)
+
 	_data_view_toggle = CheckBox.new()
 	_data_view_toggle.text = "Data view"
 	_data_view_toggle.tooltip_text = "Show a vegetation population's ecosystem forces as colours:\nred = dead zones, green = density, blue = water influence."
