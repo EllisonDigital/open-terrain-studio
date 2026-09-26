@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+[package]
+name = "ots-import-fixture"
+version = "0.1.0"
+edition = "2024"
+[workspace]
+[dependencies]
+terrain-core = { path = "../../../crates/terrain-core" }
+serde_json = "1"
