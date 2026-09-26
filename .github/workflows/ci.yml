@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: ['**']
     tags: ['v[0-9]*']
+  # Synchronize runs on every new commit pushed to an open PR.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
