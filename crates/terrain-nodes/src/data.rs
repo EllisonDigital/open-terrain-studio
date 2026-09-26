@@ -158,7 +158,11 @@ impl NodeKind for Slope {
 
 // ---- Curvature --------------------------------------------------------------
 
-/// Convex (ridges, peaks) or concave (valleys, hollows) areas.
+/// Convex (ridges, peaks) or concave (valleys, hollows) areas, measured as
+/// height minus the Gaussian-weighted mean height around it: a topographic
+/// position index (Weiss 2001; Guisan, Weiss & Weiss 1999), not the
+/// second-derivative curvature of Evans (1979) or Zevenbergen & Thorne
+/// (1987). It is steadier on noisy terrain and picks out features of one size.
 pub struct Curvature {
     schema: NodeSchema,
 }
@@ -170,7 +174,8 @@ impl Default for Curvature {
                 "data.curvature",
                 "Curvature",
                 "Finds ridges and peaks (convex) or valleys and hollows (concave), by comparing each \
-                 point with the average height around it.",
+                 point with the average height within Radius (a topographic position index, not \
+                 surface curvature).",
                 PortType::Heightfield,
                 vec![
                     ParamDef::choice(

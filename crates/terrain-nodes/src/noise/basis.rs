@@ -1,5 +1,10 @@
 //! Gradient noise functions, implemented from the published algorithms
-//! (Perlin 2002 "Improving Noise"; Gustavson 2005 "Simplex noise demystified").
+//! (Perlin 1985 "An Image Synthesizer" and 2002 "Improving Noise"; Gustavson
+//! 2005 "Simplex noise demystified"; Worley 1996 "A Cellular Texture Basis
+//! Function"; Musgrave in Ebert et al. 1994 "Texturing and Modeling").
+//! Lattice points are hashed with SplitMix64 rather than a permutation table,
+//! and gradients are 16 unit directions (as in Perlin 1985) rather than the
+//! 2002 edge vectors, which suit 3D.
 //!
 //! Written in-house rather than taken from a crate so results can never change
 //! under us: every terrain ever made depends on these exact numbers. Only
@@ -119,7 +124,8 @@ fn unit(h: u64) -> f64 {
 }
 
 /// 2D value noise at `(x, y)` (lattice units): random heights at lattice
-/// points, smoothly interpolated. Range -1..1. Blobbier than Perlin.
+/// points, smoothly interpolated (Lewis 1989, "Algorithms for solid noise
+/// synthesis"). Range -1..1. Blobbier than Perlin.
 pub fn value(x: f64, y: f64, seed: u64) -> f64 {
     let x0 = x.floor();
     let y0 = y.floor();
@@ -216,6 +222,8 @@ fn next_octave(px: f64, py: f64, lacunarity: f64) -> (f64, f64) {
 
 /// Ridged multifractal (after Musgrave 1994): inverted, squared noise layers,
 /// each weighted by the one before, so fine detail gathers on the crests.
+/// Simplified from Musgrave's: offset 1 and weight gain 2 are fixed, and
+/// `gain` scales each octave in place of his spectral exponent H.
 /// Returns about 0..1 (sharp ridges near 1).
 pub fn ridged(basis: Basis, x: f64, y: f64, seed: u64, octaves: u32, lacunarity: f64, gain: f64) -> f64 {
     let mut sum = 0.0;
@@ -237,7 +245,7 @@ pub fn ridged(basis: Basis, x: f64, y: f64, seed: u64, octaves: u32, lacunarity:
 }
 
 /// Billow noise: layers of `|noise|`, giving rounded, puffy hills with
-/// creased valleys. Returns about -1..1.
+/// creased valleys (as libnoise's Billow module). Returns about -1..1.
 pub fn billow(basis: Basis, x: f64, y: f64, seed: u64, octaves: u32, lacunarity: f64, gain: f64) -> f64 {
     let mut sum = 0.0;
     let mut norm = 0.0;
@@ -253,7 +261,8 @@ pub fn billow(basis: Basis, x: f64, y: f64, seed: u64, octaves: u32, lacunarity:
     if norm > 0.0 { sum / norm } else { 0.0 }
 }
 
-/// Domain-warped fBm (after Quilez, "Domain warping"): fBm sampled at a
+/// Domain-warped fBm (after Quilez 2002, "Domain warping", iquilezles.org;
+/// the (5.2, 1.3) offset is his): fBm sampled at a
 /// position pushed around by two other fBm fields. `warp` is in lattice units.
 #[allow(clippy::too_many_arguments)]
 pub fn warped_fbm(
@@ -283,7 +292,8 @@ pub fn warped_fbm(
     )
 }
 
-/// Fractal Brownian motion: `octaves` layers of noise, each `lacunarity` times
+/// Fractal Brownian motion (Mandelbrot & Van Ness 1968; for terrain,
+/// Musgrave 1994): `octaves` layers of noise, each `lacunarity` times
 /// finer and `gain` times weaker. Each octave is rotated (by the exact 3-4-5
 /// angle) and offset to hide lattice alignment. Returns about -1..1.
 pub fn fbm(basis: Basis, x: f64, y: f64, seed: u64, octaves: u32, lacunarity: f64, gain: f64) -> f64 {

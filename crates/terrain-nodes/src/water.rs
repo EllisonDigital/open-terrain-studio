@@ -966,7 +966,8 @@ impl Default for Wetness {
     }
 }
 
-/// Topographic wetness index ln(a / tan β) mapped to 0..1 over this range.
+/// Topographic wetness index ln(a / tan β) (Beven & Kirkby 1979), with `a`
+/// the drained area per unit contour width, mapped to 0..1 over this range.
 const TWI_DRY: f64 = 4.0;
 const TWI_WET: f64 = 14.0;
 

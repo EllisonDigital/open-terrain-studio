@@ -5,7 +5,8 @@
 //! versions. Everything here is fixed forever, because changing it would change
 //! every terrain ever made.
 
-/// 64-bit FNV-1a hash of a byte string.
+/// 64-bit FNV-1a hash of a byte string (Fowler, Noll & Vo; offset basis and
+/// prime from the published FNV parameters).
 pub fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for &b in bytes {
@@ -15,7 +16,9 @@ pub fn fnv1a64(bytes: &[u8]) -> u64 {
     h
 }
 
-/// SplitMix64 finaliser: turns any 64-bit value into a well-mixed one.
+/// SplitMix64 finaliser: turns any 64-bit value into a well-mixed one
+/// (Steele, Lea & Flood 2014, "Fast splittable pseudorandom number
+/// generators", OOPSLA; constants from Stafford's "Mix13" variant).
 #[inline]
 pub fn mix64(mut z: u64) -> u64 {
     z = z.wrapping_add(0x9e37_79b9_7f4a_7c15);
@@ -29,7 +32,8 @@ pub fn node_seed(project_seed: u64, node_id: &str, seed_param: i64) -> u64 {
     mix64(mix64(project_seed ^ fnv1a64(node_id.as_bytes())) ^ mix64(seed_param as u64))
 }
 
-/// Derive a sub-seed (e.g. per noise octave) from a seed.
+/// Derive a sub-seed (e.g. per noise octave) from a seed. The index offset is
+/// the PCG multiplier (O'Neill 2014), used only as a well-mixed constant.
 #[inline]
 pub fn derive(seed: u64, index: u64) -> u64 {
     mix64(seed ^ mix64(index.wrapping_add(0x5851_f42d_4c95_7f2d)))

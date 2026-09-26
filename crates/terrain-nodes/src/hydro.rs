@@ -98,7 +98,8 @@ pub(crate) fn d8_steps(dx: f64, dy: f64) -> [f64; 8] {
 }
 
 /// Priority-Flood+ε (Barnes, Lehman & Mulla 2014) from the world's edges,
-/// then steepest-descent receivers on the filled surface.
+/// then steepest-descent (D8, O'Callaghan & Mark 1984) receivers on the
+/// filled surface.
 pub(crate) fn route(h: &[f64], jitter: &[f64], w: usize, ht: usize, dx: f64, dy: f64) -> Routing {
     let n = h.len();
     let step = d8_steps(dx, dy);

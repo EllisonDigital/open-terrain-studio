@@ -174,6 +174,60 @@ fn thermal_conserves_mass_and_reduces_steep_slopes() {
     assert!(steepness(h) < steepness(&g));
     assert!(out["debris"].grid().data.iter().any(|v| *v > 0.01));
 }
+/// A sand pile relaxes to the talus angle in every direction, not only along
+/// the grid axes (a four-neighbour stencil leaves diagonals near 45°).
+#[test]
+fn thermal_talus_angle_is_the_same_on_diagonals() {
+    let spec = GridSpec {
+        width: 61,
+        height: 61,
+        origin_m: [0.0, 0.0],
+        extent_m: [60.0, 60.0],
+    };
+    let c = 30i64;
+    let pile = Grid::from_fn_indexed(spec, |i, _, _| {
+        let (x, y) = ((i % 61) as i64, (i / 61) as i64);
+        if (x - c).abs() <= 1 && (y - c).abs() <= 1 {
+            40.0
+        } else {
+            0.0
+        }
+    });
+    let out = run(
+        &Thermal::default(),
+        &pile,
+        &[("duration_s", 600.0), ("diffusivity_m2_s", 10.0)],
+        None,
+        None,
+    );
+    let h = out["height"].grid();
+    let at = |x: i64, y: i64| h.get(x as u32, y as u32) as f64;
+    let apex = at(c, c);
+    let r = 6;
+    let axis = (at(c - r, c) + at(c + r, c) + at(c, c - r) + at(c, c + r)) / 4.0;
+    let q = 4; // 4·√2 ≈ 5.7 m out
+    let diag = (at(c - q, c - q) + at(c + q, c + q) + at(c - q, c + q) + at(c + q, c - q)) / 4.0;
+    let axis_deg = ((apex - axis) / r as f64).atan().to_degrees();
+    let diag_deg = ((apex - diag) / (q as f64 * std::f64::consts::SQRT_2))
+        .atan()
+        .to_degrees();
+    println!("apex {apex:.2} m, axis {axis_deg:.1}°, diagonal {diag_deg:.1}°");
+    assert!(
+        axis > 0.0 && diag > 0.0,
+        "the pile must spread past the sample points"
+    );
+    assert!(
+        axis_deg < 36.0 && diag_deg < 36.0,
+        "axis {axis_deg:.1}°, diagonal {diag_deg:.1}°"
+    );
+    assert!(
+        (axis_deg - diag_deg).abs() < 3.0,
+        "axis {axis_deg:.1}°, diagonal {diag_deg:.1}°"
+    );
+    let total = |g: &Grid| g.data.iter().map(|&v| v as f64).sum::<f64>();
+    assert!((total(h) - total(&pile)).abs() < 0.01 * total(&pile));
+}
+
 #[test]
 fn cancellation_during_simulation_and_monotonic_progress() {
     let g = terrain(65);

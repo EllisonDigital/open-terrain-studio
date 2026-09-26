@@ -13,19 +13,26 @@ use std::sync::Arc;
 use terrain_core::error::{CoreError, Result};
 use terrain_core::{EvalContext, Grid, NodeSchema, Outputs, ParamDef, PortDef, PortType, Value};
 
-/// Fixed order: west, east, north, south. Missing neighbours refer to self;
-/// the corresponding flux is always zero (closed boundaries).
+/// Fixed order: west, east, north, south, then the diagonals north-west,
+/// north-east, south-west, south-east. Missing neighbours refer to self; the
+/// corresponding flux is always zero (closed boundaries).
 #[inline]
-fn neighbours(i: usize, width: usize, len: usize) -> [usize; 4] {
+fn neighbours(i: usize, width: usize, len: usize) -> [usize; 8] {
     let x = i % width;
+    let (w, e) = (x > 0, x + 1 < width);
+    let (n, s) = (i >= width, i + width < len);
     [
-        if x > 0 { i - 1 } else { i },
-        if x + 1 < width { i + 1 } else { i },
-        if i >= width { i - width } else { i },
-        if i + width < len { i + width } else { i },
+        if w { i - 1 } else { i },
+        if e { i + 1 } else { i },
+        if n { i - width } else { i },
+        if s { i + width } else { i },
+        if n && w { i - width - 1 } else { i },
+        if n && e { i - width + 1 } else { i },
+        if s && w { i + width - 1 } else { i },
+        if s && e { i + width + 1 } else { i },
     ]
 }
-const OPPOSITE: [usize; 4] = [1, 0, 3, 2];
+const OPPOSITE: [usize; 8] = [1, 0, 3, 2, 7, 6, 5, 4];
 
 fn schema(
     id: &str,
@@ -75,7 +82,8 @@ struct Domain<'a> {
     terrain: &'a Grid,
     mask: Option<&'a Grid>,
     hardness: Option<&'a Grid>,
-    distance: [f32; 4],
+    /// Distance to each of the [`neighbours`], metres.
+    distance: [f32; 8],
     width: usize,
     len: usize,
 }
@@ -118,7 +126,10 @@ impl<'a> Domain<'a> {
             terrain,
             mask,
             hardness,
-            distance: [dx, dx, dy, dy],
+            distance: {
+                let diag = (dx * dx + dy * dy).sqrt();
+                [dx, dx, dy, dy, diag, diag, diag, diag]
+            },
             width: ctx.spec.width as usize,
             len: ctx.spec.len(),
         })
