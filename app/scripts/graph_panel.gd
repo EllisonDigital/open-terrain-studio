@@ -36,8 +36,15 @@ var viewed_port := ""
 # node id -> {"inputs": [keys], "outputs": [keys]}
 var _ports := {}
 var _add_menu: PopupMenu
+var _search_popup: PopupPanel
+var _search_field: LineEdit
+var _search_results: ItemList
 var _add_position := Vector2.ZERO
 var _type_ids: Array[String] = []
+var _search_types: Array[Dictionary] = []
+var _selection_modifier := false
+var _selection_drag := false
+var _selection_start := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -58,6 +65,21 @@ func _ready() -> void:
 
 	_add_menu = PopupMenu.new()
 	add_child(_add_menu)
+	_add_menu.id_pressed.connect(_on_add_menu_pressed)
+	_search_popup = PopupPanel.new()
+	add_child(_search_popup)
+	var search_box := VBoxContainer.new()
+	search_box.custom_minimum_size = Vector2(300, 250)
+	_search_popup.add_child(search_box)
+	_search_field = LineEdit.new()
+	_search_field.placeholder_text = "Search nodes…"
+	_search_field.text_changed.connect(_update_search_results)
+	_search_field.text_submitted.connect(func(_text): _choose_search_result())
+	search_box.add_child(_search_field)
+	_search_results = ItemList.new()
+	_search_results.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_search_results.item_activated.connect(func(index: int): _choose_search_result(index))
+	search_box.add_child(_search_results)
 
 	var add_button := Button.new()
 	add_button.text = "Add node"
@@ -270,6 +292,7 @@ func _build_add_menu() -> void:
 		child.queue_free()
 	_add_menu.clear()
 	_type_ids.clear()
+	_search_types.clear()
 	var by_category := {}
 	for t in graph.get_node_types():
 		# Portals are made with "Send to Colour tab"; colour work lives in the Colour tab.
@@ -289,9 +312,67 @@ func _build_add_menu() -> void:
 			sub.add_item(t["label"], _type_ids.size())
 			sub.set_item_tooltip(sub.item_count - 1, t["description"])
 			_type_ids.append(t["type_id"])
+			_search_types.append(t)
 		sub.id_pressed.connect(func(idx: int): add_node_at(_type_ids[idx], _add_position))
 		_add_menu.add_child(sub)
 		_add_menu.add_submenu_node_item(cat, sub)
+	_add_menu.add_separator()
+	_add_menu.add_item("Search nodes…", 10000)
+
+
+func _on_add_menu_pressed(id: int) -> void:
+	if id == 10000:
+		_open_search.call_deferred()
+
+
+func _open_search() -> void:
+	_search_field.clear()
+	_update_search_results("")
+	_search_popup.popup(Rect2i(_add_menu.position, Vector2i(320, 270)))
+	_search_field.grab_focus.call_deferred()
+
+
+func _update_search_results(query: String) -> void:
+	_search_results.clear()
+	var terms := query.strip_edges().to_lower().split(" ", false)
+	for t in _search_types:
+		var haystack := (String(t["label"]) + " " + String(t["category"]) + " " + String(t["type_id"]) + " " + String(t["description"])).to_lower()
+		var matches := true
+		for term in terms:
+			if not haystack.contains(term):
+				matches = false
+				break
+		if matches:
+			var index := _search_results.item_count
+			_search_results.add_item("%s  ·  %s" % [t["label"], t["category"]])
+			_search_results.set_item_metadata(index, t["type_id"])
+			_search_results.set_item_tooltip(index, t["description"])
+	if _search_results.item_count > 0:
+		_search_results.select(0)
+
+
+func _choose_search_result(index := -1) -> void:
+	if index < 0:
+		var selected := _search_results.get_selected_items()
+		if selected.is_empty():
+			return
+		index = selected[0]
+	if index >= _search_results.item_count:
+		return
+	var type_id: String = _search_results.get_item_metadata(index)
+	_search_popup.hide()
+	add_node_at(type_id, _add_position)
+
+
+func _input(event: InputEvent) -> void:
+	if _search_popup.visible and event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_DOWN or event.keycode == KEY_UP:
+			var selected := _search_results.get_selected_items()
+			var current := selected[0] if not selected.is_empty() else 0
+			var next := clampi(current + (1 if event.keycode == KEY_DOWN else -1), 0, _search_results.item_count - 1)
+			if _search_results.item_count > 0:
+				_search_results.select(next)
+			get_viewport().set_input_as_handled()
 
 
 func _open_add_menu(at_position: Vector2) -> void:
@@ -305,6 +386,17 @@ func _open_add_menu(at_position: Vector2) -> void:
 
 func _on_popup_request(at_position: Vector2) -> void:
 	_open_add_menu(at_position)
+
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_selection_modifier = event.shift_pressed or event.ctrl_pressed or event.meta_pressed
+		_selection_start = event.position
+	elif event is InputEventMouseButton and not event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_selection_modifier = false
+		_selection_drag = false
+	if event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and event.position.distance_to(_selection_start) > 4.0:
+		_selection_drag = true
 
 
 func _on_connection_request(from_node: StringName, from_port: int, to_node: StringName, to_port: int) -> void:
@@ -340,14 +432,17 @@ func _on_delete_nodes_request(nodes: Array[StringName]) -> void:
 
 
 func _on_node_selected(node: Node) -> void:
-	node_activated.emit(String(node.name))
+	# GraphEdit emits this for each node added by Shift/Ctrl selection and box
+	# selection. Neither operation should retarget the preview.
+	if not _selection_modifier and not _selection_drag and _selected_ids().size() == 1:
+		node_activated.emit(String(node.name))
 
 
 func _on_node_deselected(_node: Node) -> void:
 	# Wait a frame: when clicking from one node to another, the new selection
 	# arrives right after this deselection.
 	await get_tree().process_frame
-	if _selected_ids().is_empty():
+	if is_instance_valid(self) and _selected_ids().is_empty():
 		selection_cleared.emit()
 
 

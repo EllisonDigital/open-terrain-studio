@@ -47,6 +47,8 @@ var viewed_id := ""
 ## Output of the viewed node shown in the viewport (nodes like Hydraulic
 ## Erosion have several: Height, Flow, Wear…). "" = its first output.
 var viewed_port := ""
+## Pin the viewport to its current output while editing or selecting other nodes.
+var preview_locked := false
 var preview_resolution := 512
 var view_2d := false
 ## Recompute the preview after every edit; off = only on Update (F5).
@@ -76,6 +78,7 @@ var _last_preview: TerrainPreview
 var _settings_menu: PopupMenu
 var _update_button: Button
 var _res_picker: OptionButton
+var _lock_preview_button: Button
 var _preview_stale := false
 var _gpu_label: Label
 var _gpu_state := ""
@@ -242,7 +245,10 @@ func _build_ui() -> void:
 	build_panel.export_toggled.connect(_on_export_toggled)
 	build_panel.view_requested.connect(func(id):
 		graph_panel.select_node(id)
-		_view_node(id))
+		if preview_locked:
+			_show_inspector_for(id)
+		else:
+			_view_node(id))
 	side_tabs.add_child(build_panel)
 
 	# Status bar.
@@ -300,6 +306,14 @@ func _build_view_toolbar() -> Control:
 		_request_preview())
 	bar.add_child(res)
 	_res_picker = res
+	_lock_preview_button = Button.new()
+	_lock_preview_button.text = "Lock preview"
+	_lock_preview_button.toggle_mode = true
+	_lock_preview_button.tooltip_text = "Keep showing this node and output while selecting or editing other nodes. Click again to follow selection."
+	_lock_preview_button.toggled.connect(func(on):
+		preview_locked = on
+		_set_status("Preview locked to %s · %s" % [viewed_id, _viewed_port()] if on else "Preview follows single-node selection."))
+	bar.add_child(_lock_preview_button)
 
 	_update_button = Button.new()
 	_update_button.text = "Update (F5)"
@@ -448,6 +462,8 @@ func _build_dialogs() -> void:
 
 func _new_project_with_starter_graph() -> void:
 	project.new_project()
+	preview_locked = false
+	_lock_preview_button.set_pressed_no_signal(false)
 	project_path = ""
 	# A useful starting point: fractal noise remapped to the world height range.
 	var fbm := graph.add_node("noise.fbm", Vector2(40, 60))
@@ -487,6 +503,8 @@ func _restore_ui_state() -> void:
 		var nodes := graph.get_nodes()
 		viewed = nodes[-1]["id"] if nodes.size() > 0 else ""
 	viewed_port = state.get("viewed_port", "")
+	preview_locked = bool(state.get("preview_locked", false))
+	_lock_preview_button.set_pressed_no_signal(preview_locked)
 	if state.has("preview_resolution") and int(state["preview_resolution"]) in PREVIEW_RESOLUTIONS:
 		preview_resolution = int(state["preview_resolution"])
 		_res_picker.select(PREVIEW_RESOLUTIONS.find(preview_resolution))
@@ -502,6 +520,7 @@ func _save_project(path: String) -> bool:
 	project.set_ui_state(JSON.stringify({
 		"viewed_node": viewed_id,
 		"viewed_port": _viewed_port(),
+		"preview_locked": preview_locked,
 		"preview_resolution": preview_resolution,
 		"camera": view.get_camera_state(),
 		"view_2d": view_2d,
@@ -647,7 +666,7 @@ func _request_preview() -> void:
 
 
 func _on_node_activated(id: String) -> void:
-	if id != viewed_id:
+	if id != viewed_id and not preview_locked:
 		_view_node(id)
 	else:
 		_show_inspector_for(id)
@@ -657,6 +676,8 @@ func _on_selection_cleared() -> void:
 	inspector.show_world()
 	if not graph.has_node(viewed_id):
 		viewed_id = ""
+		preview_locked = false
+		_lock_preview_button.set_pressed_no_signal(false)
 		_request_preview()
 
 
@@ -664,6 +685,8 @@ func _on_graph_edited() -> void:
 	_update_title()
 	if viewed_id != "" and not graph.has_node(viewed_id):
 		viewed_id = ""
+		preview_locked = false
+		_lock_preview_button.set_pressed_no_signal(false)
 	build_panel.refresh()
 	_terrain_edited()
 

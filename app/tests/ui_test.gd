@@ -75,6 +75,41 @@ func run() -> void:
 	check(main.graph_panel.get_connection_list().size() == 3, "graph shows 3 links")
 	await shot("02_combine")
 
+	# Search includes only node types available on this graph tab.
+	main.graph_panel._open_add_menu(Vector2(100, 100))
+	main.graph_panel._open_search()
+	main.graph_panel._search_field.text = "perlin"
+	main.graph_panel._update_search_results("perlin")
+	var found_perlin := false
+	for i in main.graph_panel._search_results.item_count:
+		if main.graph_panel._search_results.get_item_metadata(i) == "noise.perlin":
+			found_perlin = true
+	check(found_perlin, "add-node search filters by type")
+	main.graph_panel._search_field.text = "no-such-node"
+	main.graph_panel._update_search_results("no-such-node")
+	check(main.graph_panel._search_results.item_count == 0, "add-node search handles no matches")
+	main.graph_panel._search_popup.hide()
+	main.graph_panel._add_menu.hide()
+
+	# Shift/box multi-selection must never change the preview target.
+	main.graph_panel._selection_modifier = true
+	main.graph_panel.get_node(NodePath(fbm)).selected = true
+	check(main.viewed_id == combine, "multi-selection keeps viewed node")
+	main.graph_panel._selection_modifier = false
+	main.graph_panel._selection_drag = true
+	main.graph_panel.get_node(NodePath(perlin)).selected = true
+	check(main.viewed_id == combine, "box selection keeps viewed node")
+	main.graph_panel._selection_drag = false
+	main.graph_panel.select_node(combine)
+	main._lock_preview_button.button_pressed = true
+	main.graph_panel.select_node(fbm)
+	main._on_node_activated(fbm)
+	check(main.viewed_id == combine and main.inspector.get_node_id() == fbm, "lock keeps preview but follows inspector selection")
+	main._lock_preview_button.button_pressed = false
+	main.graph_panel.select_node(perlin)
+	check(main.viewed_id == perlin, "unlock follows single-node selection")
+	main._view_node(combine)
+
 	# World settings panel.
 	main._on_selection_cleared()
 	await frames(3)
