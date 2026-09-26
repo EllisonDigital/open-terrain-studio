@@ -29,6 +29,9 @@ impl NodeKind for RockHardness {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         super::check_cancel(ctx)?;
         let input = ctx.input_grid("in")?;

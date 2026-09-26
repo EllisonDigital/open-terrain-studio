@@ -33,6 +33,10 @@ pub const MAX_POINT_CELLS: u64 = 40_000_000;
 /// Scale over which the terrain is compared with its surroundings to find
 /// valleys (wetter) and peaks and ridges, in metres.
 const RELIEF_SIGMA_M: f64 = 120.0;
+/// Blur (metres) spreading steep ground into its dead-zone run-out.
+const DEAD_RUNOUT_SIGMA_M: f64 = 25.0;
+/// Blur (metres) of an earlier population for "grow near".
+const NEAR_SIGMA_M: f64 = 40.0;
 /// Height below (or above) the surroundings that counts as fully a valley
 /// (or a ridge), in metres.
 const RELIEF_RANGE_M: f32 = 40.0;
@@ -153,7 +157,12 @@ pub fn scatter(density: &Grid, height: &Grid, s: &Scatter, cancel: &dyn Fn() -> 
         if cancel() {
             return Err(CoreError::Cancelled);
         }
-        let (px, py) = (phase % 3, phase / 3);
+        // Phases by world cell, so a tile of the world gives the same points.
+        let (px, py) = (phase as i64 % 3, phase as i64 / 3);
+        let (px, py) = (
+            (px - ci0).rem_euclid(3) as usize,
+            (py - cj0).rem_euclid(3) as usize,
+        );
         let slots_ref = &slots;
         let placed: Vec<(usize, [f32; 2])> = (py..ny)
             .step_by(3)
@@ -229,6 +238,13 @@ pub fn scatter(density: &Grid, height: &Grid, s: &Scatter, cancel: &dyn Fn() -> 
         });
     }
     Ok(points)
+}
+
+/// How far [`scatter`] reads: each of its nine phases looks two background
+/// cells (of `spacing / √2`) further, and a point may move within its cell.
+pub fn scatter_reach(spacing_m: f64) -> f64 {
+    let cell = spacing_m.max(0.01) / std::f64::consts::SQRT_2;
+    (9.0 * 2.0 + 2.0) * cell
 }
 
 fn scatter_from_params(ctx: &EvalContext, density: &Grid, height: &Grid) -> Result<PointSet> {
@@ -445,6 +461,15 @@ impl NodeKind for Population {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        use crate::common::{blur_reach, cell_m};
+        // Slope, then relief and Spread blurs, dead-zone run-out and "grow
+        // near", then the point sampler.
+        let blurs = blur_reach(RELIEF_SIGMA_M)
+            + blur_reach(ctx.f64("spread_m") * 0.5)
+            + blur_reach(DEAD_RUNOUT_SIGMA_M).max(blur_reach(NEAR_SIGMA_M));
+        terrain_core::Reach::Local(2.0 * cell_m(ctx) + blurs + scatter_reach(ctx.f64("spacing_m")))
+    }
 
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let height = ctx.input_grid("in")?.clone();
@@ -509,7 +534,7 @@ impl NodeKind for Population {
         let dead_slope = ctx.f32("dead_slope_deg");
         let dead = if dead_amount > 0.0 {
             let steep = slope.map(|s| smoothstep(dead_slope - 6.0, dead_slope + 6.0, s));
-            let runout = gaussian_blur(&steep, 25.0);
+            let runout = gaussian_blur(&steep, DEAD_RUNOUT_SIGMA_M);
             Grid::from_fn_indexed(spec, |i, x, y| {
                 let slide = snow.as_ref().map_or(0.0, |s| {
                     s.data[i].clamp(0.0, 1.0) * smoothstep(25.0, 40.0, slope.data[i])
@@ -528,7 +553,7 @@ impl NodeKind for Population {
         let mode = ctx.choice("occupied_mode");
         let strength = ctx.f32("occupied_strength");
         let near = match (&occupied, mode.as_str()) {
-            (Some(o), "near") => Some(gaussian_blur(o, 40.0)),
+            (Some(o), "near") => Some(gaussian_blur(o, NEAR_SIGMA_M)),
             _ => None,
         };
         ctx.report_progress(0.5);
@@ -651,6 +676,11 @@ impl NodeKind for Debris {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        use crate::common::{blur_reach, cell_m};
+        let blur = blur_reach(ctx.f64("reach_m") * 0.5);
+        terrain_core::Reach::Local(2.0 * cell_m(ctx) + blur + scatter_reach(ctx.f64("spacing_m")))
+    }
 
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let height = ctx.input_grid("in")?.clone();
@@ -728,6 +758,9 @@ impl Default for PackMasks {
 impl NodeKind for PackMasks {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {

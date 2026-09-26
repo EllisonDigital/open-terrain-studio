@@ -173,6 +173,9 @@ impl NodeKind for Colourise {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
         let g = chosen_gradient(ctx);
@@ -250,6 +253,9 @@ impl NodeKind for Blend {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let (a, b) = (ctx.input_color("a")?, ctx.input_color("b")?);
         let mask = ctx.input("mask").map(|v| v.grid().clone());
@@ -307,6 +313,9 @@ impl Default for Layers {
 impl NodeKind for Layers {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let base = ctx.input_color("base")?;
@@ -378,6 +387,9 @@ impl NodeKind for Image {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let path = ctx
             .path("path")
@@ -443,6 +455,9 @@ impl NodeKind for NormalMap {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        terrain_core::Reach::Local(crate::common::cell_m(ctx))
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let h = ctx.input_grid("in")?;
         let (gx, gy) = gradient(h);
@@ -505,6 +520,9 @@ impl Default for Occlusion {
 impl NodeKind for Occlusion {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        terrain_core::Reach::Local(crate::common::blur_reach(ctx.f64("radius_m")))
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let h = ctx.input_grid("in")?;
@@ -581,6 +599,9 @@ impl Default for Splat {
 impl NodeKind for Splat {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let layers: Vec<Option<Arc<Grid>>> = (1..=SPLAT_LAYERS)
@@ -665,6 +686,9 @@ impl Portal {
 impl NodeKind for Portal {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let v = ctx.input("in").cloned().ok_or_else(|| CoreError::MissingInput {

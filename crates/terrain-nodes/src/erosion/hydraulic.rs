@@ -223,6 +223,28 @@ impl NodeKind for Hydraulic {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn world_spec(&self, ctx: &EvalContext) -> Option<GridSpec> {
+        Some(simulation_spec(ctx.spec.whole(), ctx.f64("detail_m")))
+    }
+    fn finish_tile(&self, ctx: &EvalContext, world: &terrain_core::WorldPass) -> Result<Outputs> {
+        let mut outputs = Outputs::new();
+        for port in &self.schema.outputs {
+            if let Some(v) = world.outputs.get(&port.key) {
+                let how = self.upsample(port);
+                outputs.insert(
+                    port.key.clone(),
+                    terrain_core::node::upsample_value(ctx, world, v, &how)?,
+                );
+            }
+        }
+        // As untiled: ground with zero strength keeps its input exactly.
+        if let (Some(mask), Some(Value::Heightfield(h))) = (ctx.input("mask"), outputs.get("height")) {
+            let (mask, input) = (mask.grid(), ctx.input_grid("in")?);
+            let kept = h.map_indexed(|i, v| if mask.data[i] > 0.0 { v } else { input.data[i] });
+            outputs.insert("height".into(), Value::Heightfield(Arc::new(kept)));
+        }
+        Ok(outputs)
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let d = Domain::new(ctx)?;
         ctx.report_progress(0.0);

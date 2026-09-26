@@ -526,6 +526,19 @@ impl Graph {
         Ok(order)
     }
 
+    /// Nodes needed to evaluate all of `targets`, in dependency order.
+    pub fn evaluation_order_of(&self, targets: &[&str]) -> Result<Vec<NodeId>> {
+        let mut order = Vec::new();
+        let mut state: BTreeMap<NodeId, bool> = BTreeMap::new();
+        for target in targets {
+            if !self.nodes.contains_key(*target) {
+                return Err(CoreError::NodeNotFound((*target).into()));
+            }
+            self.visit(target, &mut state, &mut order)?;
+        }
+        Ok(order)
+    }
+
     fn visit(&self, id: &str, state: &mut BTreeMap<NodeId, bool>, order: &mut Vec<NodeId>) -> Result<()> {
         match state.get(id) {
             Some(true) => return Ok(()),

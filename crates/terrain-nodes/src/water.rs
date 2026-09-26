@@ -1,7 +1,7 @@
 //! Water and hydrology nodes: flow, lakes, rivers, sea and snow.
 //! See `docs/water.md` for the methods, units and limits.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 
 use rayon::prelude::*;
 use terrain_core::error::{CoreError, Result};
@@ -74,6 +74,15 @@ impl Drainage {
         }
     }
 
+    /// The drainage grid of a world pass: its terrain as it is.
+    fn whole(terrain: &Grid) -> Self {
+        Self {
+            spec: terrain.spec,
+            same: true,
+            heights: terrain.data.iter().map(|&v| v as f64).collect(),
+        }
+    }
+
     fn size(&self) -> (usize, usize) {
         (self.spec.width as usize, self.spec.height as usize)
     }
@@ -99,6 +108,44 @@ impl Drainage {
         } else {
             Grid::from_fn(ctx.spec, |x, y| sample_nearest_m(&grid, x, y))
         }
+    }
+}
+
+/// The terrain a world pass ran on.
+fn world_terrain<'w>(ctx: &EvalContext, world: &'w terrain_core::WorldPass) -> Result<&'w Arc<Grid>> {
+    world
+        .inputs
+        .get("in")
+        .map(|v| v.grid())
+        .ok_or_else(|| fail(ctx, "the world pass has no terrain"))
+}
+
+/// An analysis of a world pass's terrain (lakes, river courses), kept while
+/// that terrain exists so every tile of a build shares one.
+pub(crate) struct Memo<T> {
+    slot: Mutex<Option<(Weak<Grid>, Arc<T>)>>,
+}
+
+impl<T> Default for Memo<T> {
+    fn default() -> Self {
+        Self {
+            slot: Mutex::new(None),
+        }
+    }
+}
+
+impl<T> Memo<T> {
+    fn get(&self, terrain: &Arc<Grid>, make: impl FnOnce() -> Result<T>) -> Result<Arc<T>> {
+        let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((held, value)) = slot.as_ref()
+            // Alive, so the same address is the same terrain.
+            && held.upgrade().is_some_and(|g| Arc::ptr_eq(&g, terrain))
+        {
+            return Ok(value.clone());
+        }
+        let value = Arc::new(make()?);
+        *slot = Some((Arc::downgrade(terrain), value.clone()));
+        Ok(value)
     }
 }
 
@@ -153,11 +200,13 @@ fn heightfield(grid: Grid) -> Value {
 /// Fill the terrain's depressions with water up to where each would spill.
 pub struct Lakes {
     schema: NodeSchema,
+    memo: Memo<LakePlan>,
 }
 
 impl Default for Lakes {
     fn default() -> Self {
         Self {
+            memo: Memo::default(),
             schema: NodeSchema {
                 type_id: "simulate.lakes".into(),
                 type_version: 1,
@@ -284,83 +333,116 @@ impl NodeKind for Lakes {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn world_spec(&self, ctx: &EvalContext) -> Option<GridSpec> {
+        Some(simulation_spec(ctx.spec.whole(), ctx.f64("detail_m")))
+    }
+    fn finish_reach(&self, ctx: &EvalContext) -> f64 {
+        ctx.f64("shore_width_m") + 2.0 * crate::common::cell_m(ctx)
+    }
+    fn finish_tile(&self, ctx: &EvalContext, world: &terrain_core::WorldPass) -> Result<Outputs> {
+        let t = terrain(ctx)?;
+        let coarse = world_terrain(ctx, world)?;
+        let plan = self
+            .memo
+            .get(coarse, || lake_plan(ctx, &Drainage::whole(coarse)))?;
+        Ok(draw_lakes(ctx, t, &plan))
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let t = terrain(ctx)?;
         ctx.report_progress(0.0);
-        let d = Drainage::new(ctx, t);
-        let (w, ht) = d.size();
-        let [dx, dy] = d.spec.cell_size_m();
-        let filled = hydro::fill_depressions(&d.heights, w, ht);
-        check_cancel(ctx)?;
-        ctx.report_progress(0.5);
-        let (ids, lakes) = find_lakes(
-            &d.heights,
-            &filled,
-            w,
-            ht,
-            dx * dy,
-            ctx.f64("min_depth_m"),
-            ctx.f64("min_area_m2"),
-        );
-        check_cancel(ctx)?;
+        let plan = lake_plan(ctx, &Drainage::new(ctx, t))?;
+        let outputs = draw_lakes(ctx, t, &plan);
+        ctx.report_progress(1.0);
+        Ok(outputs)
+    }
+}
 
-        // Lake id at full resolution: nearest drainage cell.
-        let id_grid = Grid {
+/// Where the lakes are, from the drainage grid.
+struct LakePlan {
+    /// Lake id of each drainage cell (-1: none).
+    id_grid: Grid,
+    lakes: Vec<Lake>,
+}
+
+fn lake_plan(ctx: &EvalContext, d: &Drainage) -> Result<LakePlan> {
+    let (w, ht) = d.size();
+    let [dx, dy] = d.spec.cell_size_m();
+    let filled = hydro::fill_depressions(&d.heights, w, ht);
+    check_cancel(ctx)?;
+    ctx.report_progress(0.5);
+    let (ids, lakes) = find_lakes(
+        &d.heights,
+        &filled,
+        w,
+        ht,
+        dx * dy,
+        ctx.f64("min_depth_m"),
+        ctx.f64("min_area_m2"),
+    );
+    check_cancel(ctx)?;
+    Ok(LakePlan {
+        id_grid: Grid {
             spec: d.spec,
             data: ids
                 .iter()
                 .map(|&i| if i == usize::MAX { -1.0 } else { i as f32 })
                 .collect(),
-        };
-        let infill = ctx.f64("infill");
-        let n = ctx.spec.len();
-        let mut bed = vec![0.0f32; n];
-        let mut surface = vec![0.0f32; n];
-        let mut water = vec![false; n];
-        let mut lake_mask = vec![0.0f32; n];
-        let spec = ctx.spec;
-        let rows = bed
-            .par_chunks_mut(spec.width as usize)
-            .zip(surface.par_chunks_mut(spec.width as usize))
-            .zip(water.par_chunks_mut(spec.width as usize))
-            .zip(lake_mask.par_chunks_mut(spec.width as usize));
-        rows.enumerate().for_each(|(j, (((bed, surface), water), mask))| {
-            let y = spec.y_m(j as u32);
-            for i in 0..bed.len() {
-                let h = t.data[j * spec.width as usize + i] as f64;
-                let x = spec.x_m(i as u32);
-                let id = sample_nearest_m(&id_grid, x, y);
-                let (mut b, mut s, mut m) = (h, h, 0.0);
-                if id >= 0.0 {
-                    let lake = &lakes[id as usize];
-                    if lake.level > h {
-                        b = h.max(lake.level - (1.0 - infill) * lake.depth);
-                        s = lake.level;
-                        // Soft only over the last 10 cm, so shallow edges stay water.
-                        m = ((lake.level - h) / 0.1).min(1.0);
-                    }
+        },
+        lakes,
+    })
+}
+
+/// Lake beds, surfaces and masks over `ctx.spec` (terrain `t`).
+fn draw_lakes(ctx: &EvalContext, t: &Grid, plan: &LakePlan) -> Outputs {
+    let (id_grid, lakes) = (&plan.id_grid, &plan.lakes);
+    // Lake id at full resolution: nearest drainage cell.
+    let infill = ctx.f64("infill");
+    let n = ctx.spec.len();
+    let mut bed = vec![0.0f32; n];
+    let mut surface = vec![0.0f32; n];
+    let mut water = vec![false; n];
+    let mut lake_mask = vec![0.0f32; n];
+    let spec = ctx.spec;
+    let rows = bed
+        .par_chunks_mut(spec.width as usize)
+        .zip(surface.par_chunks_mut(spec.width as usize))
+        .zip(water.par_chunks_mut(spec.width as usize))
+        .zip(lake_mask.par_chunks_mut(spec.width as usize));
+    rows.enumerate().for_each(|(j, (((bed, surface), water), mask))| {
+        let y = spec.y_m(j as u32);
+        for i in 0..bed.len() {
+            let h = t.data[j * spec.width as usize + i] as f64;
+            let x = spec.x_m(i as u32);
+            let id = sample_nearest_m(id_grid, x, y);
+            let (mut b, mut s, mut m) = (h, h, 0.0);
+            if id >= 0.0 {
+                let lake = &lakes[id as usize];
+                if lake.level > h {
+                    b = h.max(lake.level - (1.0 - infill) * lake.depth);
+                    s = lake.level;
+                    // Soft only over the last 10 cm, so shallow edges stay water.
+                    m = ((lake.level - h) / 0.1).min(1.0);
                 }
-                bed[i] = b as f32;
-                surface[i] = s as f32;
-                water[i] = m >= 0.5;
-                mask[i] = m as f32;
             }
-        });
-        let shore = waterline_band(spec, &water, ctx.f64("shore_width_m"));
-        ctx.report_progress(1.0);
-        Ok(Outputs::from([
-            ("height".into(), heightfield(Grid { spec, data: bed })),
-            ("water_surface".into(), heightfield(Grid { spec, data: surface })),
-            (
-                "lakes".into(),
-                mask(Grid {
-                    spec,
-                    data: lake_mask,
-                }),
-            ),
-            ("shore".into(), mask(shore)),
-        ]))
-    }
+            bed[i] = b as f32;
+            surface[i] = s as f32;
+            water[i] = m >= 0.5;
+            mask[i] = m as f32;
+        }
+    });
+    let shore = waterline_band(spec, &water, ctx.f64("shore_width_m"));
+    Outputs::from([
+        ("height".into(), heightfield(Grid { spec, data: bed })),
+        ("water_surface".into(), heightfield(Grid { spec, data: surface })),
+        (
+            "lakes".into(),
+            mask(Grid {
+                spec,
+                data: lake_mask,
+            }),
+        ),
+        ("shore".into(), mask(shore)),
+    ])
 }
 
 // ---- Rivers -----------------------------------------------------------------
@@ -368,11 +450,13 @@ impl NodeKind for Lakes {
 /// Carve river channels where enough water collects.
 pub struct Rivers {
     schema: NodeSchema,
+    memo: Memo<Vec<Reach>>,
 }
 
 impl Default for Rivers {
     fn default() -> Self {
         Self {
+            memo: Memo::default(),
             schema: NodeSchema {
                 type_id: "simulate.rivers".into(),
                 type_version: 1,
@@ -547,131 +631,152 @@ impl NodeKind for Rivers {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn world_spec(&self, ctx: &EvalContext) -> Option<GridSpec> {
+        Some(simulation_spec(ctx.spec.whole(), ctx.f64("detail_m")))
+    }
+    fn finish_tile(&self, ctx: &EvalContext, world: &terrain_core::WorldPass) -> Result<Outputs> {
+        let t = terrain(ctx)?;
+        let coarse = world_terrain(ctx, world)?;
+        let reaches = self
+            .memo
+            .get(coarse, || river_plan(ctx, &Drainage::whole(coarse)))?;
+        Ok(draw_rivers(ctx, t, &reaches))
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let t = terrain(ctx)?;
         ctx.report_progress(0.0);
-        let d = Drainage::new(ctx, t);
-        let [dx, dy] = d.spec.cell_size_m();
-        let r = d.route();
-        check_cancel(ctx)?;
-        let area = hydro::accumulate_d8(&r, dx * dy);
-        let reaches = river_reaches(&d, &r, &area, ctx);
-        check_cancel(ctx)?;
+        let reaches = river_plan(ctx, &Drainage::new(ctx, t))?;
         ctx.report_progress(0.4);
+        let outputs = draw_rivers(ctx, t, &reaches);
+        ctx.report_progress(1.0);
+        Ok(outputs)
+    }
+}
 
-        let spec = ctx.spec;
-        let (w, ht) = (spec.width as usize, spec.height as usize);
-        let bank = ctx.f64("bank_width_m");
-        let [cx, cy] = spec.cell_size_m();
-        let pixel = cx.min(cy);
-        // Bucket reaches by blocks of rows; each block is then independent.
-        const BLOCK: usize = 32;
-        let blocks = ht.div_ceil(BLOCK);
-        let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); blocks];
-        let row_of = |y: f64| (y - spec.origin_m[1]) / cy;
-        for (n, reach) in reaches.iter().enumerate() {
-            let rad = reach.radius(bank) + pixel;
-            let lo = row_of(reach.a[1].min(reach.b[1]) - rad).floor().max(0.0) as usize;
-            let hi = (row_of(reach.a[1].max(reach.b[1]) + rad).ceil().max(0.0) as usize).min(ht - 1);
-            if lo > hi {
-                continue;
-            }
-            for bucket in &mut buckets[lo / BLOCK..=hi / BLOCK] {
-                bucket.push(n as u32);
-            }
+/// The river courses, from the drainage grid.
+fn river_plan(ctx: &EvalContext, d: &Drainage) -> Result<Vec<Reach>> {
+    let [dx, dy] = d.spec.cell_size_m();
+    let r = d.route();
+    check_cancel(ctx)?;
+    let area = hydro::accumulate_d8(&r, dx * dy);
+    let reaches = river_reaches(d, &r, &area, ctx);
+    check_cancel(ctx)?;
+    Ok(reaches)
+}
+
+/// River channels, banks and water over `ctx.spec` (terrain `t`).
+fn draw_rivers(ctx: &EvalContext, t: &Grid, reaches: &[Reach]) -> Outputs {
+    let spec = ctx.spec;
+    let (w, ht) = (spec.width as usize, spec.height as usize);
+    let bank = ctx.f64("bank_width_m");
+    let [cx, cy] = spec.cell_size_m();
+    let pixel = cx.min(cy);
+    // Bucket reaches by blocks of rows; each block is then independent.
+    const BLOCK: usize = 32;
+    let blocks = ht.div_ceil(BLOCK);
+    let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); blocks];
+    let row_of = |y: f64| (y - spec.origin_m[1]) / cy;
+    for (n, reach) in reaches.iter().enumerate() {
+        let rad = reach.radius(bank) + pixel;
+        let lo = row_of(reach.a[1].min(reach.b[1]) - rad).floor().max(0.0) as usize;
+        let hi = (row_of(reach.a[1].max(reach.b[1]) + rad).ceil().max(0.0) as usize).min(ht - 1);
+        if lo > hi {
+            continue;
         }
+        for bucket in &mut buckets[lo / BLOCK..=hi / BLOCK] {
+            bucket.push(n as u32);
+        }
+    }
 
-        let mut height = t.data.clone();
-        let mut surface = t.data.clone();
-        let mut river = vec![0.0f32; spec.len()];
-        let mut riverbank = vec![0.0f32; spec.len()];
-        height
-            .par_chunks_mut(w * BLOCK)
-            .zip(surface.par_chunks_mut(w * BLOCK))
-            .zip(river.par_chunks_mut(w * BLOCK))
-            .zip(riverbank.par_chunks_mut(w * BLOCK))
-            .enumerate()
-            .for_each(|(block, (((height, surface), river), riverbank))| {
-                let j0 = block * BLOCK;
-                let rows = height.len() / w;
-                let mut water_level = vec![f64::NEG_INFINITY; height.len()];
-                for &n in &buckets[block] {
-                    let reach = &reaches[n as usize];
-                    let rad = reach.radius(bank) + pixel;
-                    let (x0, x1) = (reach.a[0].min(reach.b[0]) - rad, reach.a[0].max(reach.b[0]) + rad);
-                    let (y0, y1) = (reach.a[1].min(reach.b[1]) - rad, reach.a[1].max(reach.b[1]) + rad);
-                    let i_lo = ((x0 - spec.origin_m[0]) / cx).floor().max(0.0) as usize;
-                    let i_hi = (((x1 - spec.origin_m[0]) / cx).ceil().max(0.0) as usize).min(w - 1);
-                    let r_lo = (row_of(y0).floor().max(j0 as f64) as usize).max(j0);
-                    let r_hi = (row_of(y1).ceil().max(0.0) as usize).min(j0 + rows - 1);
-                    let (ax, ay) = (reach.b[0] - reach.a[0], reach.b[1] - reach.a[1]);
-                    let len2 = ax * ax + ay * ay;
-                    for j in r_lo..=r_hi {
-                        let y = spec.y_m(j as u32);
-                        for i in i_lo..=i_hi {
-                            let x = spec.x_m(i as u32);
-                            let (px, py) = (x - reach.a[0], y - reach.a[1]);
-                            let s = if len2 > 0.0 {
-                                ((px * ax + py * ay) / len2).clamp(0.0, 1.0)
-                            } else {
-                                0.0
-                            };
-                            let (qx, qy) = (px - s * ax, py - s * ay);
-                            let dist = (qx * qx + qy * qy).sqrt();
-                            let hw = reach.half_width[0] + (reach.half_width[1] - reach.half_width[0]) * s;
-                            if dist >= hw + bank.max(0.5 * pixel) {
-                                continue;
-                            }
-                            let level = reach.level[0] + (reach.level[1] - reach.level[0]) * s;
-                            let depth = reach.depth[0] + (reach.depth[1] - reach.depth[0]) * s;
-                            let k = (j - j0) * w + i;
-                            let h = t.data[j * w + i] as f64;
-                            let target = if dist < hw {
-                                let u = dist / hw;
-                                level - depth * (1.0 - u * u)
-                            } else if bank > 0.0 {
-                                let u = ((dist - hw) / bank) as f32;
-                                level + smoothstep(0.0, 1.0, u) as f64 * (h - level)
-                            } else {
-                                h
-                            };
-                            height[k] = height[k].min(target.min(h) as f32);
-                            // Share of the pixel covered by water, so rivers
-                            // narrower than a pixel still show.
-                            let cover = ((hw - dist) / pixel + 0.5).clamp(0.0, 1.0) as f32;
-                            river[k] = river[k].max(cover);
-                            if dist < hw {
-                                water_level[k] = water_level[k].max(level);
-                            } else if bank > 0.0 {
-                                let u = ((dist - hw) / bank) as f32;
-                                riverbank[k] = riverbank[k].max(1.0 - smoothstep(0.0, 1.0, u));
-                            }
+    let mut height = t.data.clone();
+    let mut surface = t.data.clone();
+    let mut river = vec![0.0f32; spec.len()];
+    let mut riverbank = vec![0.0f32; spec.len()];
+    height
+        .par_chunks_mut(w * BLOCK)
+        .zip(surface.par_chunks_mut(w * BLOCK))
+        .zip(river.par_chunks_mut(w * BLOCK))
+        .zip(riverbank.par_chunks_mut(w * BLOCK))
+        .enumerate()
+        .for_each(|(block, (((height, surface), river), riverbank))| {
+            let j0 = block * BLOCK;
+            let rows = height.len() / w;
+            let mut water_level = vec![f64::NEG_INFINITY; height.len()];
+            for &n in &buckets[block] {
+                let reach = &reaches[n as usize];
+                let rad = reach.radius(bank) + pixel;
+                let (x0, x1) = (reach.a[0].min(reach.b[0]) - rad, reach.a[0].max(reach.b[0]) + rad);
+                let (y0, y1) = (reach.a[1].min(reach.b[1]) - rad, reach.a[1].max(reach.b[1]) + rad);
+                let i_lo = ((x0 - spec.origin_m[0]) / cx).floor().max(0.0) as usize;
+                let i_hi = (((x1 - spec.origin_m[0]) / cx).ceil().max(0.0) as usize).min(w - 1);
+                let r_lo = (row_of(y0).floor().max(j0 as f64) as usize).max(j0);
+                let r_hi = (row_of(y1).ceil().max(0.0) as usize).min(j0 + rows - 1);
+                let (ax, ay) = (reach.b[0] - reach.a[0], reach.b[1] - reach.a[1]);
+                let len2 = ax * ax + ay * ay;
+                for j in r_lo..=r_hi {
+                    let y = spec.y_m(j as u32);
+                    for i in i_lo..=i_hi {
+                        let x = spec.x_m(i as u32);
+                        let (px, py) = (x - reach.a[0], y - reach.a[1]);
+                        let s = if len2 > 0.0 {
+                            ((px * ax + py * ay) / len2).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        let (qx, qy) = (px - s * ax, py - s * ay);
+                        let dist = (qx * qx + qy * qy).sqrt();
+                        let hw = reach.half_width[0] + (reach.half_width[1] - reach.half_width[0]) * s;
+                        if dist >= hw + bank.max(0.5 * pixel) {
+                            continue;
+                        }
+                        let level = reach.level[0] + (reach.level[1] - reach.level[0]) * s;
+                        let depth = reach.depth[0] + (reach.depth[1] - reach.depth[0]) * s;
+                        let k = (j - j0) * w + i;
+                        let h = t.data[j * w + i] as f64;
+                        let target = if dist < hw {
+                            let u = dist / hw;
+                            level - depth * (1.0 - u * u)
+                        } else if bank > 0.0 {
+                            let u = ((dist - hw) / bank) as f32;
+                            level + smoothstep(0.0, 1.0, u) as f64 * (h - level)
+                        } else {
+                            h
+                        };
+                        height[k] = height[k].min(target.min(h) as f32);
+                        // Share of the pixel covered by water, so rivers
+                        // narrower than a pixel still show.
+                        let cover = ((hw - dist) / pixel + 0.5).clamp(0.0, 1.0) as f32;
+                        river[k] = river[k].max(cover);
+                        if dist < hw {
+                            water_level[k] = water_level[k].max(level);
+                        } else if bank > 0.0 {
+                            let u = ((dist - hw) / bank) as f32;
+                            riverbank[k] = riverbank[k].max(1.0 - smoothstep(0.0, 1.0, u));
                         }
                     }
                 }
-                for k in 0..height.len() {
-                    riverbank[k] *= 1.0 - river[k];
-                    surface[k] = if water_level[k] > height[k] as f64 {
-                        water_level[k] as f32
-                    } else {
-                        height[k]
-                    };
-                }
-            });
-        ctx.report_progress(1.0);
-        Ok(Outputs::from([
-            ("height".into(), heightfield(Grid { spec, data: height })),
-            ("water_surface".into(), heightfield(Grid { spec, data: surface })),
-            ("river".into(), mask(Grid { spec, data: river })),
-            (
-                "riverbank".into(),
-                mask(Grid {
-                    spec,
-                    data: riverbank,
-                }),
-            ),
-        ]))
-    }
+            }
+            for k in 0..height.len() {
+                riverbank[k] *= 1.0 - river[k];
+                surface[k] = if water_level[k] > height[k] as f64 {
+                    water_level[k] as f32
+                } else {
+                    height[k]
+                };
+            }
+        });
+    Outputs::from([
+        ("height".into(), heightfield(Grid { spec, data: height })),
+        ("water_surface".into(), heightfield(Grid { spec, data: surface })),
+        ("river".into(), mask(Grid { spec, data: river })),
+        (
+            "riverbank".into(),
+            mask(Grid {
+                spec,
+                data: riverbank,
+            }),
+        ),
+    ])
 }
 
 // ---- Sea --------------------------------------------------------------------
@@ -881,6 +986,10 @@ impl NodeKind for Snow {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        let smoothing = ctx.f64("smoothing_m").max(0.0);
+        terrain_core::Reach::Local(crate::common::blur_reach(smoothing) + crate::common::cell_m(ctx))
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let t = terrain(ctx)?;
         let (gx, gy) = gradient(t);
@@ -974,6 +1083,9 @@ const TWI_WET: f64 = 14.0;
 impl NodeKind for Wetness {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn world_spec(&self, ctx: &EvalContext) -> Option<GridSpec> {
+        Some(simulation_spec(ctx.spec.whole(), ctx.f64("detail_m")))
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let t = terrain(ctx)?;
@@ -1218,6 +1330,15 @@ impl Default for Flow {
 impl NodeKind for Flow {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn world_spec(&self, ctx: &EvalContext) -> Option<GridSpec> {
+        Some(simulation_spec(ctx.spec.whole(), ctx.f64("detail_m")))
+    }
+    fn upsample(&self, output: &PortDef) -> terrain_core::Upsample {
+        match output.key.as_str() {
+            "direction" | "basins" => terrain_core::Upsample::Nearest,
+            _ => terrain_core::Upsample::Bilinear,
+        }
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let t = terrain(ctx)?;

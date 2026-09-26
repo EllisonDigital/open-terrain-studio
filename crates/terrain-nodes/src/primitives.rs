@@ -85,6 +85,9 @@ impl NodeKind for Gradient {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let (cx, cy) = position(ctx);
         let (dx, dy) = direction(ctx.f64("angle_deg"));
@@ -138,6 +141,9 @@ impl NodeKind for Cone {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let (cx, cy) = position(ctx);
         let r = ctx.f64("radius_m");
@@ -169,6 +175,9 @@ impl Default for Hemisphere {
 impl NodeKind for Hemisphere {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let (cx, cy) = position(ctx);
@@ -262,6 +271,9 @@ impl NodeKind for Shape {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let (cx, cy) = position(ctx);
         let size = ctx.f64("size_m");
@@ -332,6 +344,9 @@ impl Default for File {
 impl NodeKind for File {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
 
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {

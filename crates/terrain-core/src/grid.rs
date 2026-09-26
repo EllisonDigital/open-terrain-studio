@@ -4,8 +4,12 @@ use serde::{Deserialize, Serialize};
 use crate::error::{CoreError, Result};
 use crate::world::World;
 
-/// Largest supported resolution per axis.
+/// Largest resolution per axis of one grid held in memory.
 pub const MAX_RESOLUTION: u32 = 16384;
+
+/// Largest build resolution per axis. Builds are evaluated in tiles, so no
+/// single grid gets this big.
+pub const MAX_BUILD_RESOLUTION: u32 = 65537;
 
 /// Where a grid sits in the world and how finely it samples it.
 ///
@@ -13,10 +17,10 @@ pub const MAX_RESOLUTION: u32 = 16384;
 /// sample `(width-1, height-1)` is exactly at `origin_m + extent_m`, like the
 /// vertices of a terrain mesh (and like Unreal's 1009/2017/4033 landscape sizes).
 ///
-/// Grids are tile-aware from day one: a tile is simply a grid whose origin is not
-/// the world origin. Nodes must compute positions through [`GridSpec::x_m`] /
-/// [`GridSpec::y_m`] so the same world position gives the same value in any tile
-/// and at any resolution.
+/// A tile is a [`GridSpec::window`] of a larger grid. Nodes must compute
+/// positions through [`GridSpec::x_m`] / [`GridSpec::y_m`] (and cell sizes
+/// through [`GridSpec::cell_size_m`]) so the same world position gives the
+/// same value in any tile and at any resolution.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GridSpec {
     pub width: u32,
@@ -24,6 +28,23 @@ pub struct GridSpec {
     /// World position of sample (0, 0), in metres.
     pub origin_m: [f64; 2],
     /// World distance covered from the first to the last sample, in metres.
+    pub extent_m: [f64; 2],
+    /// Set for a window of a larger grid (a tile of a build): positions and
+    /// cell size then come from that grid, so every sample of a tile is
+    /// bit-identical to the same sample of the whole grid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<Window>,
+}
+
+/// Where a [`GridSpec`] window sits in the grid it was cut from.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Window {
+    /// Column and row of the window's sample (0, 0) in the whole grid.
+    pub offset: [u32; 2],
+    /// The whole grid's width and height.
+    pub size: [u32; 2],
+    /// The whole grid's origin and extent, in metres.
+    pub origin_m: [f64; 2],
     pub extent_m: [f64; 2],
 }
 
@@ -33,12 +54,27 @@ impl GridSpec {
         if !(2..=MAX_RESOLUTION).contains(&resolution) {
             return Err(CoreError::InvalidResolution(resolution));
         }
-        Ok(Self {
-            width: resolution,
-            height: resolution,
-            origin_m: [0.0, 0.0],
-            extent_m: world.size_m,
-        })
+        Ok(Self::new(resolution, resolution, [0.0, 0.0], world.size_m))
+    }
+
+    /// The whole world at a build resolution, which may exceed
+    /// [`MAX_RESOLUTION`]: only ever evaluated through windows.
+    pub fn build_world(world: &World, resolution: u32) -> Result<Self> {
+        if !(2..=MAX_BUILD_RESOLUTION).contains(&resolution) {
+            return Err(CoreError::InvalidResolution(resolution));
+        }
+        Ok(Self::new(resolution, resolution, [0.0, 0.0], world.size_m))
+    }
+
+    /// A whole grid (not a window) of `width × height` samples.
+    pub fn new(width: u32, height: u32, origin_m: [f64; 2], extent_m: [f64; 2]) -> Self {
+        Self {
+            width,
+            height,
+            origin_m,
+            extent_m,
+            window: None,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -49,8 +85,57 @@ impl GridSpec {
         self.len() == 0
     }
 
+    /// The grid this is a window of, or itself.
+    pub fn whole(&self) -> GridSpec {
+        match self.window {
+            Some(w) => GridSpec::new(w.size[0], w.size[1], w.origin_m, w.extent_m),
+            None => *self,
+        }
+    }
+
+    /// Column and row of sample (0, 0) in [`GridSpec::whole`].
+    pub fn offset(&self) -> [u32; 2] {
+        self.window.map_or([0, 0], |w| w.offset)
+    }
+
+    /// The window of columns `i0..i0 + width` and rows `j0..j0 + height` of
+    /// this grid's [whole grid](GridSpec::whole). The whole grid itself if
+    /// the window covers all of it.
+    ///
+    /// # Panics
+    /// If the window reaches outside the whole grid or is under 2 × 2.
+    pub fn window(&self, i0: u32, j0: u32, width: u32, height: u32) -> GridSpec {
+        let whole = self.whole();
+        assert!(
+            width >= 2 && height >= 2 && i0 + width <= whole.width && j0 + height <= whole.height,
+            "window {i0},{j0} {width}×{height} outside a {}×{} grid",
+            whole.width,
+            whole.height
+        );
+        if i0 == 0 && j0 == 0 && width == whole.width && height == whole.height {
+            return whole;
+        }
+        let first = [whole.x_m(i0), whole.y_m(j0)];
+        let last = [whole.x_m(i0 + width - 1), whole.y_m(j0 + height - 1)];
+        GridSpec {
+            width,
+            height,
+            origin_m: first,
+            extent_m: [last[0] - first[0], last[1] - first[1]],
+            window: Some(Window {
+                offset: [i0, j0],
+                size: [whole.width, whole.height],
+                origin_m: whole.origin_m,
+                extent_m: whole.extent_m,
+            }),
+        }
+    }
+
     /// Distance between neighbouring samples, in metres.
     pub fn cell_size_m(&self) -> [f64; 2] {
+        if self.window.is_some() {
+            return self.whole().cell_size_m();
+        }
         [
             self.extent_m[0] / (self.width.max(2) - 1) as f64,
             self.extent_m[1] / (self.height.max(2) - 1) as f64,
@@ -60,13 +145,37 @@ impl GridSpec {
     /// World x (metres) of column `i`.
     #[inline]
     pub fn x_m(&self, i: u32) -> f64 {
-        self.origin_m[0] + self.extent_m[0] * (i as f64 / (self.width - 1) as f64)
+        match self.window {
+            Some(w) => w.origin_m[0] + w.extent_m[0] * ((i + w.offset[0]) as f64 / (w.size[0] - 1) as f64),
+            None => self.origin_m[0] + self.extent_m[0] * (i as f64 / (self.width - 1) as f64),
+        }
     }
 
     /// World y (metres) of row `j`.
     #[inline]
     pub fn y_m(&self, j: u32) -> f64 {
-        self.origin_m[1] + self.extent_m[1] * (j as f64 / (self.height - 1) as f64)
+        match self.window {
+            Some(w) => w.origin_m[1] + w.extent_m[1] * ((j + w.offset[1]) as f64 / (w.size[1] - 1) as f64),
+            None => self.origin_m[1] + self.extent_m[1] * (j as f64 / (self.height - 1) as f64),
+        }
+    }
+
+    /// Fractional column of world x (metres): 0 at the first sample.
+    #[inline]
+    pub fn column_at(&self, x_m: f64) -> f64 {
+        match self.window {
+            Some(w) => (x_m - w.origin_m[0]) / w.extent_m[0] * (w.size[0] - 1) as f64 - w.offset[0] as f64,
+            None => (x_m - self.origin_m[0]) / self.extent_m[0] * (self.width - 1) as f64,
+        }
+    }
+
+    /// Fractional row of world y (metres): 0 at the first sample.
+    #[inline]
+    pub fn row_at(&self, y_m: f64) -> f64 {
+        match self.window {
+            Some(w) => (y_m - w.origin_m[1]) / w.extent_m[1] * (w.size[1] - 1) as f64 - w.offset[1] as f64,
+            None => (y_m - self.origin_m[1]) / self.extent_m[1] * (self.height - 1) as f64,
+        }
     }
 }
 
@@ -153,6 +262,15 @@ impl Grid {
         self.data[j as usize * self.spec.width as usize + i as usize]
     }
 
+    /// The part of this grid covered by `to`, a window of the same whole
+    /// grid lying inside this one.
+    pub fn crop(&self, to: GridSpec) -> Grid {
+        Grid {
+            spec: to,
+            data: crop_samples(&self.data, 1, self.spec, to),
+        }
+    }
+
     /// Sample with clamped coordinates: edges never read out of bounds.
     #[inline]
     pub fn get_clamped(&self, i: i64, j: i64) -> f32 {
@@ -163,8 +281,8 @@ impl Grid {
 
     /// Bilinear sample at a world position in metres (clamped at the edges).
     pub fn sample_bilinear_m(&self, x_m: f64, y_m: f64) -> f32 {
-        let fx = (x_m - self.spec.origin_m[0]) / self.spec.extent_m[0] * (self.spec.width - 1) as f64;
-        let fy = (y_m - self.spec.origin_m[1]) / self.spec.extent_m[1] * (self.spec.height - 1) as f64;
+        let fx = self.spec.column_at(x_m);
+        let fy = self.spec.row_at(y_m);
         let x0 = fx.floor();
         let y0 = fy.floor();
         let tx = (fx - x0) as f32;
@@ -177,6 +295,14 @@ impl Grid {
         let top = a + (b - a) * tx;
         let bottom = c + (d - c) * tx;
         top + (bottom - top) * ty
+    }
+
+    /// Value of the sample nearest a world position in metres (clamped at
+    /// the edges), for categories and angles that must not be blended.
+    pub fn sample_nearest_m(&self, x_m: f64, y_m: f64) -> f32 {
+        let i = self.spec.column_at(x_m).round() as i64;
+        let j = self.spec.row_at(y_m).round() as i64;
+        self.get_clamped(i, j)
     }
 
     /// Minimum and maximum sample values.
@@ -201,6 +327,31 @@ impl Grid {
         let sum: f64 = self.data.iter().map(|&v| v as f64).sum();
         sum / self.data.len() as f64
     }
+}
+
+/// The samples (`channels` values each) of `from` that `to` covers. Both
+/// must be windows of the same whole grid, `to` inside `from`.
+fn crop_samples(data: &[f32], channels: usize, from: GridSpec, to: GridSpec) -> Vec<f32> {
+    if from == to {
+        return data.to_vec();
+    }
+    let (fo, to_o) = (from.offset(), to.offset());
+    assert!(
+        from.whole() == to.whole()
+            && to_o[0] >= fo[0]
+            && to_o[1] >= fo[1]
+            && to_o[0] + to.width <= fo[0] + from.width
+            && to_o[1] + to.height <= fo[1] + from.height,
+        "crop to {to:?} from {from:?}: not a window inside it"
+    );
+    let (di, dj) = ((to_o[0] - fo[0]) as usize, (to_o[1] - fo[1]) as usize);
+    let (fw, tw) = (from.width as usize * channels, to.width as usize * channels);
+    let mut out = vec![0.0f32; to.len() * channels];
+    out.par_chunks_mut(tw).enumerate().for_each(|(j, row)| {
+        let start = (j + dj) * fw + di * channels;
+        row.copy_from_slice(&data[start..start + tw]);
+    });
+    out
 }
 
 /// A colour per sample: red, green, blue and alpha, each 0..1, row-major and
@@ -229,6 +380,14 @@ impl ColorGrid {
         Self { spec, data }
     }
 
+    /// The part of this colour map covered by `to` (see [`Grid::crop`]).
+    pub fn crop(&self, to: GridSpec) -> ColorGrid {
+        ColorGrid {
+            spec: to,
+            data: crop_samples(&self.data, 4, self.spec, to),
+        }
+    }
+
     /// Colour of sample `index`.
     #[inline]
     pub fn at(&self, index: usize) -> [f32; 4] {
@@ -248,8 +407,8 @@ impl ColorGrid {
     pub fn sample_bilinear_m(&self, x_m: f64, y_m: f64) -> [f32; 4] {
         std::array::from_fn(|c| {
             let s = self.spec;
-            let fx = (x_m - s.origin_m[0]) / s.extent_m[0] * (s.width - 1) as f64;
-            let fy = (y_m - s.origin_m[1]) / s.extent_m[1] * (s.height - 1) as f64;
+            let fx = s.column_at(x_m);
+            let fy = s.row_at(y_m);
             let (x0, y0) = (fx.floor(), fy.floor());
             let (tx, ty) = ((fx - x0) as f32, (fy - y0) as f32);
             let at = |i: i64, j: i64| {

@@ -41,6 +41,9 @@ impl NodeKind for Constant {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         heightfield_out(Grid::filled(ctx.spec, ctx.f32("height_m")))
     }
@@ -100,6 +103,9 @@ impl Default for Combine {
 impl NodeKind for Combine {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let a = ctx.input_grid("a")?;
@@ -172,12 +178,32 @@ impl NodeKind for Levels {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        if ctx.bool("auto_input") {
+            terrain_core::Reach::Global
+        } else {
+            crate::common::point_wise()
+        }
+    }
+    fn world_spec(&self, _ctx: &EvalContext) -> Option<terrain_core::GridSpec> {
+        None
+    }
+    fn finish_tile(&self, ctx: &EvalContext, world: &terrain_core::WorldPass) -> Result<Outputs> {
+        let range = world.ranges.get("in").copied();
+        self.levels(ctx, range)
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        self.levels(ctx, None)
+    }
+}
+
+impl Levels {
+    /// Levels over `ctx`; `range` is the input range to use for "Auto input
+    /// range" (the input's own when `None`).
+    fn levels(&self, ctx: &EvalContext, range: Option<(f32, f32)>) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
-        // Note: auto range uses the min/max of this grid. Tiled builds (v0.8)
-        // will need a global pre-pass so every tile uses the same range.
         let (in_lo, in_hi) = if ctx.bool("auto_input") {
-            input.min_max()
+            range.unwrap_or_else(|| input.min_max())
         } else {
             (ctx.f32("in_low_m"), ctx.f32("in_high_m"))
         };

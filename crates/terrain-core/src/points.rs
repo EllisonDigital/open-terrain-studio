@@ -73,6 +73,26 @@ impl PointSet {
         }
     }
 
+    /// The points inside `spec`'s area (edges included), with `spec` as
+    /// their region.
+    pub fn within(&self, spec: GridSpec) -> PointSet {
+        let (x0, y0) = (spec.origin_m[0], spec.origin_m[1]);
+        let (x1, y1) = (x0 + spec.extent_m[0], y0 + spec.extent_m[1]);
+        let mut out = PointSet {
+            spec,
+            data: Vec::new(),
+            species_index: Vec::new(),
+            species: self.species.clone(),
+        };
+        for p in self.iter() {
+            let (x, y) = (p.x_m as f64, p.y_m as f64);
+            if x >= x0 && x <= x1 && y >= y0 && y <= y1 {
+                out.push(p);
+            }
+        }
+        out
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = Point> + '_ {
         (0..self.len()).map(|i| self.get(i))
     }
@@ -99,8 +119,8 @@ impl PointSet {
         let mut grid = Grid::filled(spec, 0.0);
         let (w, h) = (spec.width as i64, spec.height as i64);
         for p in self.iter() {
-            let i = ((p.x_m as f64 - spec.origin_m[0]) / spec.extent_m[0] * (w - 1) as f64).round() as i64;
-            let j = ((p.y_m as f64 - spec.origin_m[1]) / spec.extent_m[1] * (h - 1) as f64).round() as i64;
+            let i = spec.column_at(p.x_m as f64).round() as i64;
+            let j = spec.row_at(p.y_m as f64).round() as i64;
             if (0..w).contains(&i) && (0..h).contains(&j) {
                 grid.data[(j * w + i) as usize] = 1.0;
             }
