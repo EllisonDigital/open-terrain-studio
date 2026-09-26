@@ -17,6 +17,7 @@ Ten milestones take the project from an empty repo to a stable v1.0; each one en
 | v0.5 | Water and hydrology | Rivers, lakes, sea, snow, and their masks | M |
 | v0.6 | Colour and texturing | Colour maps, splat/weight maps, normal maps for engines | M |
 | v0.7 | Vegetation | Trees/Shrubs/Grass populations, density masks and point export | L |
+| v0.7.5 | Vegetation tab | Vegetation in its own graph tab, fed from Terrain through portals | S |
 | v0.8 | Production scale | Tiled 16K builds, mesh export, portals, groups, presets | L |
 | v0.9 | Interop and polish | Engine presets, import helpers, docs, UX polish | M |
 | v1.0 | Stable release | Frozen file format, installers, full docs | M |
@@ -230,6 +231,26 @@ limits are in [vegetation.md](vegetation.md).
 - Export: per-population greyscale masks, RGBA packing, CSV/JSON points.
 
 **Exit criteria:** three chained populations (pine, birch, shrubs) with visibly different habitats; 1M+ points generated in under 10 seconds; exported points reproduce the same placement in Godot and Unreal via a simple import script.
+
+### v0.7.5 — Vegetation tab
+
+**Goal:** give vegetation its own graph tab, the way colour has one, so the Terrain tab stays about landforms.
+
+**Status (26 Sep 2026):** built on the `v0.7.5-vegetation-tab` branch; not merged or released.
+
+- *Done and tested:*
+  - The graph has three tabs: **Terrain**, **Vegetation** and **Colour**.
+  - Trees, Shrubs, Grass and Debris / Rocks are offered only in the Vegetation tab. The Vegetation tab also
+    offers mask tools (Data, Adjust, Combine, Noise) and Output nodes such as Pack Masks.
+  - Terrain heights and masks arrive through the same Height and Mask Portals the Colour tab uses. A Terrain
+    node's settings can send any height or mask output to the Vegetation or Colour tab. A Vegetation node's
+    masks can go on to the Colour tab (e.g. to colour forests).
+  - Portals show which tab they come from.
+  - Projects saved by v0.7 open with their vegetation moved to the new tab. Each Terrain output they used gets
+    one portal, so every link stays visible, and results are bit-identical (tested).
+  - *Forest valley* and *Asterfall Crown* are laid out this way.
+- *Not changed:* evaluation, caching and the file format. A node's `tab` is still an editor-only setting, and
+  links may still cross tabs.
 
 ### v0.8 — Production scale
 

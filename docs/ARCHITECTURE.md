@@ -187,6 +187,12 @@ pub trait NodeKind: Send + Sync {
 
 **Graph tabs.** A project has two graph tabs. The **Terrain** tab holds everything that shapes the landscape and its data (height, erosion, water, masks, vegetation). The **Colour** tab is only for applying colour: it reads Terrain outputs through portals and produces colour maps and splat/weight maps. The Terrain tab exists from v0.1; the Colour tab arrives in v0.6.
 
+> **Changed 26 Sep 2026 (v0.7.5):** there are three tabs: **Terrain**, **Vegetation** and **Colour**.
+> - Vegetation (Trees, Shrubs, Grass, Debris / Rocks) lives in its own tab and reads Terrain outputs through the same portals as Colour. `Graph::add_portal` makes one; the editor's "Send to … tab" buttons use it.
+> - Portals carry heights and masks only. They go from Terrain to Vegetation or Colour, and from Vegetation to Colour.
+> - Projects from v0.7 are tidied on load (`Graph::move_vegetation_to_tab`): Vegetation-category nodes in the Terrain tab move to the Vegetation tab. Every height or mask link that then crosses tabs is routed through one portal per source output. A portal passes its input through, so results don't change.
+> - Tabs remain editor-only.
+
 **Node library by category**
 
 | Category | Examples |
