@@ -4,15 +4,12 @@
 Roadmap milestone: **v0.9 — Import helpers (delivered early)**. This implements
 the import-helper item ahead of the rest of v0.9, not the entire milestone.
 
-Branch: `import-helpers`, based on `origin/v0.2-shaping` at
-`ebb6a3dc6b4135f4c1497f5baf745e5034b371dd` (MR !2).
+Branch: `import-helpers`, rebased onto `origin/main` on 26 September 2026.
 Worktree: `../open-terrain-studio-import-helpers`.
 
-Ready to integrate after v0.2: merge/cherry-pick the local import-helpers commit.
-Changes are exclusively new files under `import-helpers/` and one appended
-“Import helpers” section in `docs/export-guides.md`. No app/core/CI/roadmap changes
-or changes to the other worktrees; nothing pushed and no MR opened. Add roadmap
-notes during integration. Code is clean-room and MIT OR Apache-2.0.
+Changes are confined to `import-helpers/` and the “Import helpers” section in
+`docs/export-guides.md`; no app/core/shader/roadmap/architecture edits. No PR opened.
+Code is clean-room and MIT OR Apache-2.0.
 
 - Blender: installable add-on ZIP, multi-terrain import, exact EXR and lossless PNG16,
   metre scaling, packed mask images and per-vertex mask attributes.
@@ -38,3 +35,12 @@ Windows/macOS and other Blender versions were not tested. Full-resolution meshes
 are limited to 4,194,304 vertices per image; no tiling/LOD or Godot collision.
 Generated exports, ZIP, scenes and test build products are ignored in `.work/` and
 can be regenerated; no fixtures or binaries need to be merged.
+
+PointSet update (Windows, 26 September 2026): both CSV and JSON point formats are
+validated; Blender uses Geometry Nodes on species point meshes, Godot MultiMeshes,
+and Unreal a Python/native HISM bridge with 8,192-instance batches. Deterministic
+5,000/1,000,000-point fixtures include corners, rotations and scale extremes.
+Python 3.14.7 passed 11 tests; a million CSV points parsed in 2.635 s. A 1009²
+real-export 5,000-point Unreal dry run passed. **Blender and Godot were not installed
+here: neither engine importer, transform checks, save/reload nor the 30-second
+million-point target was run. Unreal Editor/bridge compilation remains untested.**

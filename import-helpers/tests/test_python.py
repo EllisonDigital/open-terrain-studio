@@ -12,8 +12,8 @@ import zlib
 HELPERS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HELPERS / "blender" / "openterrainstudio_import"))
 sys.path.insert(0, str(HELPERS / "unreal"))
-from ots_manifest import BuildError, load_build, read_png16, select_outputs, ORIENTATION
-from ots_import_build import expected_hints, unreal_height_m, landscape_layout, plan_build, asset_name
+from ots_manifest import BuildError, load_build, read_png16, read_points, select_outputs, ORIENTATION
+from ots_import_build import expected_hints, unreal_height_m, landscape_layout, plan_build, asset_name, instance_batches
 
 
 from png_fixture import png16
@@ -153,6 +153,45 @@ class ImportTests(unittest.TestCase):
     def test_asset_names_do_not_collide_after_sanitising(self):
         self.assertNotEqual(asset_name({"node":"a/b","port":"c"}), asset_name({"node":"a_b","port":"c"}))
         self.assertNotEqual(asset_name({"node":"a","port":"b/c"}), asset_name({"node":"a/b","port":"c"}))
+
+    def test_points_alternative_encodings_and_unreal_frame(self):
+        species = ["pine", "birch"]
+        rows = [[0, 0, -120, 0, 0.25, 0], [1008, 504, 2280, 90, 4, 1]]
+        (self.folder / "points.json").write_text(json.dumps({"format": "ots-points", "version": 1, "species": species, "points": rows}))
+        (self.folder / "points.csv").write_text("x,y,z,rotation_deg,scale,species\n0,0,-120,0,0.25,pine\n1008,504,2280,90,4,birch\n")
+        entries = [{"file": "points." + fmt, "node": "trees", "port": "points", "data": "PointSet", "format": fmt,
+                    "encoding": "metres", "count": 2, "species": species} for fmt in ("csv", "json")]
+        self.info["files"].extend(entries)
+        self.write()
+        loaded = load_build(self.path)
+        entries = loaded["files"][-2:]
+        self.assertEqual([list(row) for row in read_points(entries[0], loaded)], rows)
+        self.assertEqual(read_points(entries[1], loaded), rows)
+        self.assertEqual([e["format"] for e in select_outputs(loaded) if e["data"] == "PointSet"], ["csv"])
+        self.assertEqual(len(plan_build(self.path)["points"]), 1)
+        self.assertEqual(list(instance_batches(entries[0], loaded)),
+                         [("pine", [(0, 0, -12000, 0, 0.25)]), ("birch", [(100800, 50400, 228000, 90, 4)])])
+        for change, pattern in [({"count": 3}, "count mismatch"), ({"species": ["pine"]}, "unknown species"),
+                                ({"data": "Unknown"}, "Unsupported"), ({"encoding": "pixels"}, "Unsupported")]:
+            bad = dict(entries[0], **change)
+            self.info["files"][-2] = bad
+            self.write()
+            with self.assertRaisesRegex(BuildError, pattern):
+                data = load_build(self.path)
+                read_points(data["files"][-2], data)
+            self.info["files"][-2] = {key: value for key, value in entries[0].items() if key != "path"}
+        self.write()
+        for changed, pattern in [(lambda p: p[0].__setitem__(0, -0.000002), "outside"),
+                                 (lambda p: p[0].__setitem__(2, float("nan")), "Non-finite"),
+                                 (lambda p: p[0].__setitem__(5, 2), "species index")]:
+            altered = copy.deepcopy(rows)
+            changed(altered)
+            (self.folder / "points.json").write_text(json.dumps({"format": "ots-points", "version": 1, "species": species, "points": altered}))
+            with self.assertRaisesRegex(BuildError, pattern):
+                read_points(entries[1], load_build(self.path))
+        (self.folder / "points.json").write_text(json.dumps({"format": "ots-points", "version": 2, "species": species, "points": rows}))
+        with self.assertRaisesRegex(BuildError, "version"):
+            read_points(entries[1], load_build(self.path))
 
 
 if __name__ == "__main__":

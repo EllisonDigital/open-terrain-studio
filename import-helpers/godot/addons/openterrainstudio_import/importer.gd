@@ -46,11 +46,19 @@ static func validate(info: Variant, directory: String) -> String:
 			return "Each files entry needs string data and format"
 		var data: String = entry.get("data", "")
 		var format: String = entry.get("format", "")
-		if data not in ["heightfield", "mask"] or format not in ["exr32", "png16"]:
+		if (data == "PointSet" and format not in ["csv", "json"]) or (data not in ["heightfield", "mask", "PointSet"]) or (data != "PointSet" and format not in ["exr32", "png16"]):
 			return "Unsupported data/format for " + entry.file
-		var expected := ("metres" if data == "heightfield" else "0..1") if format == "exr32" else ("0..65535 = height_range_m min..max" if data == "heightfield" else "0..65535 = 0..1")
+		var expected := "metres" if data == "PointSet" else (("metres" if data == "heightfield" else "0..1") if format == "exr32" else ("0..65535 = height_range_m min..max" if data == "heightfield" else "0..65535 = 0..1"))
 		if entry.get("encoding") != expected:
 			return "Unsupported encoding for " + entry.file
+		if data == "PointSet":
+			if not entry.get("count") is int or entry.count < 0 or not entry.get("species") is Array:
+				return "Invalid PointSet count/species"
+			var unique := {}
+			for species in entry.species:
+				if not species is String or species.is_empty() or "," in species or unique.has(species):
+					return "Invalid PointSet species"
+				unique[species] = true
 		var key := JSON.stringify([entry.node, entry.port])
 		if types.has(key) and types[key] != data:
 			return "Conflicting data types for " + key
@@ -65,6 +73,77 @@ static func validate(info: Variant, directory: String) -> String:
 		if not FileAccess.file_exists(directory.path_join(name)):
 			return "Missing build file: " + directory.path_join(name)
 	return ""
+
+static func _points(entry: Dictionary, info: Dictionary, directory: String) -> Dictionary:
+	var text := FileAccess.get_file_as_string(directory.path_join(entry.file))
+	var rows: Array = []
+	var species: Array = entry.species
+	if entry.format == "json":
+		var parsed := JSON.new()
+		if parsed.parse(text) != OK or not parsed.data is Dictionary:
+			return {"error": "Invalid PointSet JSON"}
+		var data: Dictionary = parsed.data
+		if data.get("format") != "ots-points" or data.get("version") != 1 or data.get("species") != species or not data.get("points") is Array:
+			return {"error": "Unsupported PointSet version/species/points"}
+		rows = data.points
+	else:
+		var lines := text.strip_edges().split("\n")
+		if lines.is_empty() or lines[0].strip_edges() != "x,y,z,rotation_deg,scale,species":
+			return {"error": "Invalid PointSet CSV header"}
+		for i in range(1, lines.size()):
+			var parts := lines[i].strip_edges().split(",")
+			if parts.size() != 6 or not species.has(parts[5]):
+				return {"error": "Invalid PointSet CSV species/row"}
+			var row := []
+			for j in 5:
+				if not parts[j].is_valid_float():
+					return {"error": "Invalid PointSet CSV number"}
+				row.append(parts[j].to_float())
+			row.append(species.find(parts[5]))
+			rows.append(row)
+	if rows.size() != entry.count:
+		return {"error": "PointSet count mismatch"}
+	var buckets: Array = []
+	for unused in species:
+		buckets.append([])
+	for row in rows:
+		if not row is Array or row.size() != 6:
+			return {"error": "Invalid PointSet row"}
+		for j in 5:
+			if not _number(row[j]):
+				return {"error": "Non-finite PointSet number"}
+		if not row[5] is int or row[5] < 0 or row[5] >= species.size():
+			return {"error": "Unknown PointSet species index"}
+		if row[0] < -0.000001 or row[0] > info.world_size_m[0] + 0.000001 or row[1] < -0.000001 or row[1] > info.world_size_m[1] + 0.000001 or row[4] <= 0:
+			return {"error": "PointSet outside world bounds or invalid scale"}
+		buckets[row[5]].append(row)
+	return {"buckets": buckets}
+
+static func _instances(entry: Dictionary, buckets: Array, info: Dictionary, scene: Node3D) -> void:
+	for species_index in entry.species.size():
+		var rows: Array = buckets[species_index]
+		var child := MultiMeshInstance3D.new()
+		child.name = (entry.node + "_" + entry.port + "_" + entry.species[species_index]).validate_node_name()
+		child.set_meta("ots_species", entry.species[species_index])
+		child.set_meta("ots_node", entry.node)
+		child.set_meta("ots_port", entry.port)
+		var multi := MultiMesh.new()
+		multi.transform_format = MultiMesh.TRANSFORM_3D
+		var placeholder := CylinderMesh.new()
+		placeholder.top_radius = 0.0
+		placeholder.bottom_radius = 0.3
+		placeholder.height = 1.0
+		multi.mesh = placeholder
+		multi.instance_count = rows.size()
+		var sx := float(info.world_size_m[0]) / 2.0
+		var sy := float(info.world_size_m[1]) / 2.0
+		for i in rows.size():
+			var row: Array = rows[i]
+			var basis := Basis(Vector3.UP, deg_to_rad(float(row[3]))).scaled(Vector3.ONE * float(row[4]))
+			multi.set_instance_transform(i, Transform3D(basis, Vector3(float(row[0]) - sx, float(row[2]), float(row[1]) - sy)))
+		child.multimesh = multi
+		scene.add_child(child, true)
+		child.owner = scene
 
 static func _image(entry: Dictionary, info: Dictionary, directory: String) -> Dictionary:
 	var image: Image
@@ -155,11 +234,11 @@ static func import_build(filename: String) -> Dictionary:
 	var selected := {}
 	for entry in info.files:
 		var key := JSON.stringify([entry.node, entry.port])
-		if not selected.has(key) or entry.format == "exr32":
+		if not selected.has(key) or entry.format == "exr32" or (entry.format == "csv" and selected[key].format == "json"):
 			selected[key] = entry
 	var loaded := {}
 	for key in selected:
-		var result := _image(selected[key], info, directory)
+		var result := _points(selected[key], info, directory) if selected[key].data == "PointSet" else _image(selected[key], info, directory)
 		if result.has("error"):
 			return result
 		loaded[key] = result
@@ -171,6 +250,9 @@ static func import_build(filename: String) -> Dictionary:
 	scene.resolution = Vector2i(info.resolution[0], info.resolution[1])
 	for key in selected:
 		var entry: Dictionary = selected[key]
+		if entry.data == "PointSet":
+			_instances(entry, loaded[key].buckets, info, scene)
+			continue
 		var texture := ImageTexture.create_from_image(loaded[key].image)
 		texture.resource_name = key
 		if entry.data == "mask":

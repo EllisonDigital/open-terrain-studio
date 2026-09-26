@@ -16,7 +16,7 @@ import math
 import bpy
 from bpy.props import StringProperty
 from bpy_extras.io_utils import ImportHelper
-from .ots_manifest import BuildError, load_build, select_outputs, label, read_png16
+from .ots_manifest import BuildError, load_build, select_outputs, label, read_png16, read_points
 
 
 def read_output(entry, info):
@@ -96,15 +96,75 @@ def make_mesh(name, heights, info):
     return mesh
 
 
+def make_points(collection, entry, points, info, unit_scale):
+    sx, sy = info["world_size_m"]
+    species = entry["species"]
+    buckets = [[] for _ in species]
+    for x, y, z, degrees, scale, index in points:
+        buckets[index].append((x - sx / 2, sy / 2 - y, z, -math.radians(degrees), scale))
+    for index, name in enumerate(species):
+        rows = buckets[index]
+        mesh = bpy.data.meshes.new("OTS points " + name)
+        mesh.vertices.add(len(rows))
+        coords, rotations, scales = array("f"), array("f"), array("f")
+        for x, y, z, yaw, scale in rows:
+            coords.extend((x, y, z))
+            rotations.append(yaw)
+            scales.append(scale)
+        mesh.vertices.foreach_set("co", coords)
+        mesh.attributes.new("rotation", "FLOAT", "POINT").data.foreach_set("value", rotations)
+        mesh.attributes.new("scale", "FLOAT", "POINT").data.foreach_set("value", scales)
+        obj = bpy.data.objects.new("OTS " + name, mesh)
+        collection.objects.link(obj)
+        obj.scale = (1.0 / unit_scale,) * 3
+        obj["ots_species"] = name
+        obj["ots_node"], obj["ots_port"] = entry["node"], entry["port"]
+        # The source object is deliberately not linked: replace it in Object Info
+        # without modifying the point mesh or regenerating the node group.
+        cone_mesh = bpy.data.meshes.new("OTS placeholder cone " + name)
+        cone_mesh.from_pydata([(0, 0, 0), (-0.3, -0.3, 1), (0.3, -0.3, 1), (0, 0.3, 1)],
+                              [], [(0, 1, 2), (0, 2, 3), (0, 3, 1), (1, 3, 2)])
+        cone = bpy.data.objects.new("OTS placeholder " + name, cone_mesh)
+        group = bpy.data.node_groups.new("OTS instances " + name, "GeometryNodeTree")
+        group.interface.new_socket(name="Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+        group.interface.new_socket(name="Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+        nodes, links = group.nodes, group.links
+        source = nodes.new("NodeGroupInput")
+        output = nodes.new("NodeGroupOutput")
+        instance = nodes.new("GeometryNodeInstanceOnPoints")
+        object_info = nodes.new("GeometryNodeObjectInfo")
+        object_info.inputs["Object"].default_value = cone
+        object_info.transform_space = "ORIGINAL"
+        yaw = nodes.new("GeometryNodeInputNamedAttribute")
+        yaw.data_type = "FLOAT"
+        yaw.inputs["Name"].default_value = "rotation"
+        vector = nodes.new("ShaderNodeCombineXYZ")
+        size = nodes.new("GeometryNodeInputNamedAttribute")
+        size.data_type = "FLOAT"
+        size.inputs["Name"].default_value = "scale"
+        links.new(source.outputs["Geometry"], instance.inputs["Points"])
+        links.new(object_info.outputs["Geometry"], instance.inputs["Instance"])
+        links.new(yaw.outputs["Attribute"], vector.inputs["Z"])
+        links.new(vector.outputs["Vector"], instance.inputs["Rotation"])
+        links.new(size.outputs["Attribute"], instance.inputs["Scale"])
+        links.new(instance.outputs["Instances"], output.inputs["Geometry"])
+        modifier = obj.modifiers.new("OTS instance on points", "NODES")
+        modifier.node_group = group
+
+
 def import_build(context, filename):
     info = load_build(filename)  # Preflight all named files before creating geometry.
     if math.prod(info["resolution"]) > 4_194_304:
         raise BuildError("This importer is limited to 4,194,304 vertices per terrain; export a smaller build")
     # Validate/read every output before linking anything into the scene.
     outputs = []
+    point_outputs = []
     try:
         for entry in select_outputs(info):
-            outputs.append((entry, *read_output(entry, info)))
+            if entry["data"] == "PointSet":
+                point_outputs.append((entry, read_points(entry, info)))
+            else:
+                outputs.append((entry, *read_output(entry, info)))
     except Exception:
         for _, image, _ in outputs:
             bpy.data.images.remove(image)
@@ -139,6 +199,8 @@ def import_build(context, filename):
         for mask, _, samples in masks:
             attr = mesh.attributes.new("OTS " + label(mask), "FLOAT", "POINT")
             attr.data.foreach_set("value", array("f", samples))
+    for entry, points in point_outputs:
+        make_points(collection, entry, points, info, unit_scale)
     return collection
 
 
@@ -155,7 +217,7 @@ class OTS_OT_import_build(bpy.types.Operator, ImportHelper):
         except (BuildError, OSError, RuntimeError) as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
-        self.report({"INFO"}, f"Imported {len(result.objects)} terrain(s); masks are in OTS mask textures")
+        self.report({"INFO"}, f"Imported {len(result.objects)} terrain and species objects; masks are in OTS mask textures")
         return {"FINISHED"}
 
 

@@ -5,6 +5,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "OTSLandscapeLibrary.generated.h"
 class ALandscape;
+class UHierarchicalInstancedStaticMeshComponent;
 
 // UE 5.6 API target. Not compiled or exercised in Unreal in this repository.
 UCLASS()
@@ -18,4 +19,10 @@ public:
         const FString& Filename, int32 Width, int32 Height,
         int32 SectionsPerComponent, int32 SectionSizeQuads,
         FVector Scale, FVector Location, const FString& Label);
+
+    UFUNCTION(BlueprintCallable, Category="OpenTerrainStudio")
+    static UHierarchicalInstancedStaticMeshComponent* CreateSpeciesInstances(ALandscape* Landscape, const FString& Species);
+
+    UFUNCTION(BlueprintCallable, Category="OpenTerrainStudio")
+    static void AddSpeciesInstances(UHierarchicalInstancedStaticMeshComponent* Component, const TArray<FTransform>& Transforms);
 };

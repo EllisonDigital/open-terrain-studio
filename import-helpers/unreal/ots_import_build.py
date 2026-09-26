@@ -19,7 +19,7 @@ import struct
 _shared = Path(__file__).resolve().parents[1] / "blender" / "openterrainstudio_import"
 if str(_shared) not in sys.path:
     sys.path.insert(0, str(_shared))
-from ots_manifest import BuildError, load_build, select_outputs, read_png16, label
+from ots_manifest import BuildError, load_build, select_outputs, read_png16, read_points, label
 
 
 def expected_hints(info):
@@ -76,21 +76,35 @@ def plan_build(filename):
             raise BuildError("Missing or invalid unreal." + key)
         if not math.isclose(actual, expected, rel_tol=1e-7, abs_tol=1e-5):
             raise BuildError(f"unreal.{key} disagrees with world metadata; re-export this build (old pre-v0.1 scale formula is not exact)")
-    chosen = select_outputs(info, ("png16", "exr32"))
+    chosen = select_outputs(info, ("png16", "exr32", "csv", "json"))
     heightfields = [e for e in chosen if e["data"] == "heightfield"]
     masks = [e for e in chosen if e["data"] == "mask"]
+    points = [e for e in chosen if e["data"] == "PointSet"]
     layout = landscape_layout(info["resolution"]) if heightfields else None
     for entry in chosen:
         if entry["data"] == "heightfield" and entry["format"] != "png16":
             raise BuildError("Unreal Landscape requires a PNG16 heightfield for " + label(entry))
         if entry["format"] == "png16":
             read_png16(entry["path"], info["resolution"])
+        elif entry["data"] == "PointSet":
+            read_points(entry, info)
     # OTS's xy_scale is derived from the X spacing. Rectangular worlds may need
     # a different Y scale; retain exact extents instead of forcing square cells.
     return {"source": info["manifest_path"], "resolution": info["resolution"],
+            "world_size_m": info["world_size_m"],
             "scale_cm": [hints["xy_scale"], info["cell_size_m"][1] * 100.0, hints["z_scale"]],
             "location_cm": [0.0, 0.0, hints["z_location"]],
-            "layout": layout, "heightfields": heightfields, "masks": masks}
+            "layout": layout, "heightfields": heightfields, "masks": masks, "points": points}
+
+
+def instance_batches(entry, info, batch_size=8192):
+    """Landscape's +X,+Y origin is the world corner; Y grows with image rows."""
+    buckets = [[] for _ in entry["species"]]
+    for x, y, z, degrees, scale, index in read_points(entry, info):
+        buckets[index].append((x * 100.0, y * 100.0, z * 100.0, degrees, scale))
+    for species, rows in zip(entry["species"], buckets):
+        for start in range(0, len(rows), batch_size):
+            yield species, rows[start:start + batch_size]
 
 
 def import_build(filename, destination="/Game/OpenTerrainStudio/Import"):
@@ -108,9 +122,11 @@ def import_build(filename, destination="/Game/OpenTerrainStudio/Import"):
     except ImportError as exc:
         raise RuntimeError("Run import_build inside Unreal Editor; use --dry-run outside it") from exc
     bridge = getattr(unreal, "OTSLandscapeLibrary", None)
-    if plan["heightfields"] and bridge is None:
+    if (plan["heightfields"] or plan["points"]) and bridge is None:
         raise RuntimeError("Enable/build the bundled OpenTerrainStudioImport editor plugin and restart Unreal; Landscape creation is not exposed by stock Python")
     names = [asset_name(e) for e in plan["masks"]]
+    if plan["points"] and not plan["heightfields"]:
+        raise BuildError("PointSet import needs a Landscape output")
     if len(set(names)) != len(names):
         raise BuildError("Mask asset name collision")
     for name in names:
@@ -118,6 +134,7 @@ def import_build(filename, destination="/Game/OpenTerrainStudio/Import"):
         if unreal.EditorAssetLibrary.does_asset_exist(path):
             raise BuildError("Asset already exists; choose a new destination folder: " + path)
     textures, actors, created_paths = {}, {}, []
+    vegetation = {}
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     try:
         with unreal.ScopedEditorTransaction("Import OpenTerrainStudio build"):
@@ -131,6 +148,25 @@ def import_build(filename, destination="/Game/OpenTerrainStudio/Import"):
                 if actor is None:
                     raise RuntimeError("Landscape creation failed; see the Unreal Output Log")
                 actors[label(entry)] = actor
+            for entry in plan["points"]:
+                # Landscape position is the corner; +Y follows image rows.
+                # The native bridge owns registration and batched insertion.
+                if bridge is None:
+                    raise RuntimeError("The native bridge is required for PointSet instances")
+                for species in entry["species"]:
+                    owner = next(iter(actors.values()), None)
+                    if owner is None:
+                        raise BuildError("PointSet import needs a Landscape output")
+                    component = bridge.create_species_instances(owner, species)
+                    if component is None:
+                        raise RuntimeError("Could not create vegetation component")
+                    vegetation[(label(entry), species)] = component
+                for species, batch in instance_batches(entry, plan):
+                    transforms = [unreal.Transform(location=unreal.Vector(x, y, z),
+                                                 rotation=unreal.Rotator(0, yaw, 0),
+                                                 scale=unreal.Vector(scale, scale, scale))
+                                  for x, y, z, yaw, scale in batch]
+                    bridge.add_species_instances(vegetation[(label(entry), species)], transforms)
             for entry in plan["masks"]:
                 task = unreal.AssetImportTask()
                 for key, value in {"filename": entry["path"], "destination_path": destination,
@@ -166,7 +202,7 @@ def import_build(filename, destination="/Game/OpenTerrainStudio/Import"):
             unreal.EditorAssetLibrary.delete_asset(path)
         raise
     unreal.log_warning("OpenTerrainStudio import helper: UNTESTED IN UNREAL; verify size, heights and masks before saving the level.")
-    return {"landscapes": actors, "layer_weight_textures": textures, "plan": plan}
+    return {"landscapes": actors, "layer_weight_textures": textures, "vegetation": vegetation, "plan": plan}
 
 
 if __name__ == "__main__":

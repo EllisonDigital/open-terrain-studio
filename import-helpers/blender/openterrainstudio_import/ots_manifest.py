@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # Copyright (c) 2026 EllisonDigital
 """Dependency-free build validation and lossless PNG decoding, also used by Unreal."""
+import csv
 import json
 import math
 from pathlib import Path
@@ -13,6 +14,8 @@ ENCODINGS = {
     ("heightfield", "png16"): "0..65535 = height_range_m min..max",
     ("mask", "exr32"): "0..1",
     ("mask", "png16"): "0..65535 = 0..1",
+    ("PointSet", "csv"): "metres",
+    ("PointSet", "json"): "metres",
 }
 
 
@@ -70,6 +73,12 @@ def load_build(filename):
         expected = ENCODINGS.get((data, fmt))
         if expected is None or entry.get("encoding") != expected:
             raise BuildError(f"Unsupported data/format/encoding for {entry['file']}")
+        if data == "PointSet":
+            if isinstance(entry.get("count"), bool) or not isinstance(entry.get("count"), int) or entry["count"] < 0:
+                raise BuildError("PointSet count must be a nonnegative integer")
+            species = entry.get("species")
+            if not isinstance(species, list) or any(not isinstance(s, str) or not s or "," in s for s in species) or len(set(species)) != len(species):
+                raise BuildError("PointSet species must be unique nonempty string ids")
         if key in types and types[key] != data:
             raise BuildError(f"Conflicting data types for {key}")
         types[key] = data
@@ -88,12 +97,59 @@ def load_build(filename):
     return info
 
 
-def select_outputs(info, preference=("exr32", "png16")):
+def select_outputs(info, preference=("exr32", "png16", "csv", "json")):
     """Preserve manifest order, deduplicating alternative encodings of one output."""
     groups = {}
     for entry in info["files"]:
         groups.setdefault((entry["node"], entry["port"]), []).append(entry)
     return [min(group, key=lambda f: preference.index(f["format"])) for group in groups.values()]
+
+
+def read_points(entry, info):
+    """Return (x, y, z, degrees, scale, species index) rows in manifest order."""
+    if entry["data"] != "PointSet":
+        raise BuildError("Expected a PointSet entry")
+    species = entry["species"]
+    try:
+        if entry["format"] == "csv":
+            with open(entry["path"], newline="", encoding="utf-8") as source:
+                rows = csv.reader(source, quoting=csv.QUOTE_NONE)
+                if next(rows, None) != ["x", "y", "z", "rotation_deg", "scale", "species"]:
+                    raise BuildError("Invalid PointSet CSV header")
+                points = []
+                indices = {name: i for i, name in enumerate(species)}
+                for row in rows:
+                    if len(row) != 6 or row[5] not in indices:
+                        raise BuildError("Invalid PointSet CSV row or unknown species")
+                    points.append((*map(float, row[:5]), indices[row[5]]))
+        elif entry["format"] == "json":
+            data = json.loads(Path(entry["path"]).read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or data.get("format") != "ots-points" or type(data.get("version")) is not int or data["version"] != 1:
+                raise BuildError("Unsupported PointSet format or version")
+            if data.get("species") != species or not isinstance(data.get("points"), list):
+                raise BuildError("PointSet species/points disagree with manifest")
+            points = data["points"]
+        else:
+            raise BuildError("Unsupported PointSet format")
+    except (OSError, ValueError, TypeError, OverflowError) as exc:
+        if isinstance(exc, BuildError):
+            raise
+        raise BuildError(f"Cannot read PointSet: {exc}") from exc
+    if len(points) != entry["count"]:
+        raise BuildError("PointSet count mismatch")
+    sx, sy = info["world_size_m"]
+    for row in points:
+        if not isinstance(row, (list, tuple)) or len(row) != 6:
+            raise BuildError("Invalid PointSet point")
+        if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in row[:5]):
+            raise BuildError("Non-finite or invalid PointSet number")
+        if not -1e-6 <= row[0] <= sx + 1e-6 or not -1e-6 <= row[1] <= sy + 1e-6:
+            raise BuildError("PointSet point outside world bounds")
+        if row[4] <= 0:
+            raise BuildError("PointSet scale must be positive")
+        if type(row[5]) is not int or not 0 <= row[5] < len(species):
+            raise BuildError("Unknown PointSet species index")
+    return points
 
 
 def label(entry):

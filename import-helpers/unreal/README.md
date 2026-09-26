@@ -42,3 +42,6 @@ python3 -m unittest discover -s import-helpers/tests -p 'test_*.py' -v
 ```
 
 The six boundary values from Rust's `unreal_hints_reproduce_png_heights` test are checked against float32 arithmetic, and every uint16 value is also checked against the analytic mapping. Tests cover legal/illegal component layouts, rectangular spacing, narrow elevated height ranges, missing files, wrong generators and multiple outputs. These checks **do not establish that the editor integration works**. Validate native compilation, actor/component creation, textures, undo and saving in a real UE 5.6 project before distributing this as a tested Unreal importer.
+### Vegetation points — untested in Unreal
+
+PointSet CSV/JSON entries create one `HierarchicalInstancedStaticMeshComponent` per species on the first imported Landscape, using an engine cone placeholder. Replace the component's Static Mesh with a nominal-size species mesh. Instances are inserted in 8,192-transform batches, using absolute centimetres and the same +X/+Y image-row origin as the Landscape. The Python planner validates both point formats; the native UE 5.6 bridge is **not compiled or tested**. The 5,000-point dry run passed on a real 1009² export on Windows 26 September 2026, but this does not establish engine transforms or rendering. See [points-format.md](../points-format.md).

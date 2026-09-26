@@ -3,12 +3,14 @@
 """blender --background --factory-startup --python-exit-code 1 --python THIS -- EXPORT_DIR [single]"""
 from array import array
 import json
+import math
 from pathlib import Path
 import sys
+import time
 import bpy
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blender"))
 import openterrainstudio_import as addon
-from openterrainstudio_import.ots_manifest import BuildError, select_outputs, load_build
+from openterrainstudio_import.ots_manifest import BuildError, select_outputs, load_build, read_points
 
 folder = Path(sys.argv[sys.argv.index("--") + 1])
 single_only = sys.argv[-1] == "single"
@@ -72,4 +74,43 @@ if not single_only:
     c = addon.import_build(bpy.context, folder / "single.json")
     assert abs(c.objects[0].scale.x - 100) < 0.001
 addon.unregister()
+for name in ("points", "points-million"):
+    path = folder / (name + "-build.json")
+    if not path.exists():
+        continue
+    info = load_build(path)
+    entry = next(e for e in select_outputs(info) if e["data"] == "PointSet")
+    rows = read_points(entry, info)
+    started = time.perf_counter()
+    collection = addon.import_build(bpy.context, path)
+    duration = time.perf_counter() - started
+    point_objects = [obj for obj in collection.objects if "ots_species" in obj]
+    assert len(point_objects) == len(entry["species"])
+    terrain = next(obj for obj in collection.objects if obj.get("ots_node") == "terrain_a")
+    sx, sy = info["world_size_m"]
+    buckets = [[r for r in rows if r[5] == index] for index in range(len(entry["species"]))]
+    for obj in point_objects:
+        index = entry["species"].index(obj["ots_species"])
+        assert len(obj.data.vertices) == len(buckets[index])
+        assert obj.modifiers[0].type == "NODES"
+        yaw = obj.data.attributes["rotation"]
+        scales = obj.data.attributes["scale"]
+        for i, row in enumerate(buckets[index]):
+            x, y, z, degrees, scale, _ = row
+            point = obj.matrix_world @ obj.data.vertices[i].co
+            assert max(abs(point.x - (x - sx/2)), abs(point.y - (sy/2 - y)), abs(point.z - z)) < 1e-3
+            assert abs(yaw.data[i].value + math.radians(degrees)) < 1e-4
+            assert abs(scales.data[i].value - scale) < 1e-5
+            col = round(x / info["cell_size_m"][0])
+            grid_row = round(y / info["cell_size_m"][1])
+            imported_height = terrain.data.vertices[grid_row * info["resolution"][0] + col].co.z
+            assert abs(point.z - imported_height) <= (info["height_range_m"][1] - info["height_range_m"][0]) / 65535 / 2 + 0.001
+    reports.append({"manifest": path.name, "points": len(rows), "seconds": duration})
+    if len(rows) >= 1_000_000:
+        assert duration < 30, duration
+    for obj in list(collection.objects):
+        mesh = obj.data
+        bpy.data.objects.remove(obj, do_unlink=True)
+        bpy.data.meshes.remove(mesh)
+    bpy.data.collections.remove(collection)
 print("BLENDER_IMPORT_REPORT " + json.dumps({"blender": bpy.app.version_string, "results": reports}))

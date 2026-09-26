@@ -6,6 +6,8 @@
 #include "Landscape.h"
 #include "LandscapeEditorModule.h"
 #include "LandscapeFileFormatInterface.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "ScopedTransaction.h"
@@ -88,4 +90,26 @@ ALandscape* UOTSLandscapeLibrary::CreateLandscapeFromPng(
     Landscape->PostEditChange();
     Landscape->MarkPackageDirty();
     return Landscape;
+}
+
+UHierarchicalInstancedStaticMeshComponent* UOTSLandscapeLibrary::CreateSpeciesInstances(ALandscape* Landscape, const FString& Species)
+{
+    if (!IsValid(Landscape)) return nullptr;
+    auto* Component = NewObject<UHierarchicalInstancedStaticMeshComponent>(Landscape);
+    Component->SetMobility(EComponentMobility::Static);
+    Component->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone")));
+    if (!Component->GetStaticMesh()) return nullptr;
+    Component->ComponentTags.Add(FName(*Species));
+    Landscape->AddInstanceComponent(Component);
+    Component->RegisterComponent();
+    return Component;
+}
+
+void UOTSLandscapeLibrary::AddSpeciesInstances(UHierarchicalInstancedStaticMeshComponent* Component, const TArray<FTransform>& Transforms)
+{
+    if (IsValid(Component))
+    {
+        // Absolute world transforms; no Landscape scale should be applied twice.
+        Component->AddInstances(Transforms, false, true, false);
+    }
 }

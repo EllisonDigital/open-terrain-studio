@@ -7,6 +7,8 @@ Read an exported **build.json**, with its image files alongside it:
 - [Godot editor plugin](godot/README.md): saved terrain scenes, float textures and selectable mask preview.
 - [Unreal Python script](unreal/README.md): Landscape actors and linear layer-weight texture assets. **Untested in Unreal**, including its required native editor bridge.
 
+The helpers also accept vegetation `PointSet` CSV/JSON alternatives described in [the exact file contract](points-format.md). Blender uses one point mesh and Geometry Nodes instancer per species, Godot one `MultiMeshInstance3D` per species, and Unreal one `HierarchicalInstancedStaticMeshComponent` per species with batched inserts. Replace the placeholder cone with your own nominal-size species asset. No per-point scene objects are created.
+
 All helpers support multiple heightfields, multiple masks, alternative PNG/EXR encodings, and v0.1 single-output builds. Alternative encodings of the same `(node, port)` produce one terrain/texture. Different heightfields produce separate terrains at the **same** world position: hide the alternatives you are not using. Mask-only builds are also supported.
 
 The generator must be exactly `OpenTerrainStudio`. Missing files (including unselected alternative encodings), unsupported encodings/orientations, duplicate output formats, or contradictory grid metadata are errors. Files are resolved relative to the manifest; do not move just the JSON. Unknown extra metadata is ignored. No source files are rewritten.
@@ -25,6 +27,8 @@ CARGO_TARGET_DIR="$PWD/import-helpers/.work/target" cargo run \
   --manifest-path import-helpers/tests/fixture_export/Cargo.toml -- \
   "$PWD/import-helpers/.work/fixture" 129
 python3 import-helpers/tests/make_variants.py import-helpers/.work/fixture
+python3 import-helpers/tests/make_points.py import-helpers/.work/fixture
+python3 import-helpers/tests/make_points.py import-helpers/.work/fixture --million
 blender --background --factory-startup --python-exit-code 1 \
   --python import-helpers/tests/blender_check.py -- "$PWD/import-helpers/.work/fixture"
 python3 import-helpers/blender/package.py
@@ -38,6 +42,8 @@ CARGO_TARGET_DIR="$PWD/import-helpers/.work/target" cargo test --locked \
 ```
 
 The fixture executable calls the real `terrain_core::export::write_value`/`BuildInfo` writer. It exports two distinct heightfields and two masks in both formats, with a 2,048×1,024 m world and −120…2,280 m range, plus independent raw float reference files. Tests compare **every vertex and mask sample**, not a visual screenshot or a handful of points. Godot checks the saved/reloaded scene as well as the float texture type. An independent PNG encoder exercises all five row filters, including values whose low byte matters.
+
+`make_points.py` adds deterministic 5,000-point and million-point variants beside the export, leaving its original `build.json` intact. The engine checks compare every point's position/yaw/scale/species against CSV and its height against the imported terrain. The million-point check asserts import below 30 seconds (including terrain import, excluding fixture generation); run on a machine with the engines installed. The Unreal dry run requires a 1009² fixture: generate it with the command above substituting `fixture-large` and `1009`, then run `make_points.py` against that folder.
 
 For the larger test, repeat fixture generation using `1009` and a new `fixture-large` folder, then run each headless test with `fixture-large single` as its final arguments. This checks all 1,018,081 vertices of one EXR heightfield without keeping several large meshes in memory.
 
@@ -57,6 +63,10 @@ For the larger test, repeat fixture generation using `1009` and a new `fixture-l
 | Unreal Editor/native bridge | **Not compiled or run.** No Unreal installation was available. Python maths and dry-run checks do not validate editor APIs, texture import or native Landscape creation. |
 
 Interactive file-dialog clicks, GPU appearance, packaged game export, Windows/macOS and Blender versions other than 5.2.0 were not tested. These are explicit limits, not inferred successes from the headless runs.
+
+## PointSet results — 26 September 2026, Windows
+
+Python 3.14.7: **11 unit tests passed**. The deterministic million-point CSV parsed and validated in **2.635 s** (not an engine import). A real 1009² Rust-export fixture with 5,000 points passed Unreal's Python dry-run. Blender, Godot and Unreal executables were not available on this machine; **their new PointSet import, transform, save/reload and 30-second million-point targets have not been tested here**. Unreal's native bridge has not been compiled or run. Do not treat parser timing as Blender/Godot timing.
 
 ## Implementation references and licence
 

@@ -160,6 +160,14 @@ heightmap. Use `filter_nearest` when mesh vertices line up one-to-one with pixel
 
 ## Import helpers
 
+The helpers also read vegetation `PointSet` outputs in CSV or JSON (alternatives
+for the same node/port); see the [point contract](../import-helpers/points-format.md).
+They place one instance per point using a replaceable cone placeholder: Blender
+Geometry Nodes, Godot MultiMesh, and Unreal HISM batches (the latter untested in
+Unreal). CSV/JSON validation rejects bad counts, bounds, species and non-finite
+values. The point import and million-point performance checks for Blender/Godot
+have not been run on this machine; Python parser tests and an Unreal dry run passed.
+
 The optional [import helpers](../import-helpers/README.md) read `build.json` and its listed images,
 including multi-output builds, masks and older single-output exports. They reject a generator other
 than `OpenTerrainStudio`, missing files, and unsupported or contradictory metadata. Keep the image

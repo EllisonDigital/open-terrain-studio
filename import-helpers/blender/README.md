@@ -12,3 +12,8 @@ All masks are packed, **Non-Color** images. Pick them from the image selector, o
 All imported images are packed for portability, including PNG data converted directly from uint16 into a float image. No source PNG is routed through an eight-bit Blender image buffer. Undo the import as one operator step; rerunning imports a new collection and leaves earlier imports intact.
 
 Headless verification: [tests and measured limits](../README.md#tests). Tested with Blender 5.2.0 LTS on 25 September 2026; the add-on declares Blender 4.2 as its API minimum, but older versions were not run.
+### Vegetation points
+
+PointSet CSV/JSON outputs produce one mesh object per species, with one vertex per point and `rotation` (radians) and `scale` point attributes. Its Geometry Nodes **Instance on Points** modifier references an unlinked placeholder cone through an Object Info node. Replace that Object Info object's reference with your species object (nominal size at scale 1). Points share the centred, metre-scaled terrain frame; the source rotation is reflected in Blender's Y axis. No object is created per point. See [points-format.md](../points-format.md).
+
+The 5,000/1,000,000-point headless checks in `tests/blender_check.py` are prepared but **not run on Windows 26 September 2026** (Blender executable unavailable). The <30 s target is unverified on this machine.

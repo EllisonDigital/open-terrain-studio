@@ -14,3 +14,8 @@ Unlike Godot's standard eight-bit PNG path, this helper explicitly decodes OTS g
 Import creates a new scene, not nodes inside your currently open scene. There is no collision, automatic reimport, LOD or tiling; add these using your game's terrain/physics approach. The helper currently caps images at 4,194,304 samples to limit full-resolution mesh allocations. Several exported terrain alternatives occupy the same space; choose which one to show.
 
 Headless [tests](../README.md#tests) passed on Godot 4.7.2 and 4.6.2 on 25 September 2026, including binary-scene reload, float texture precision, multi-output manifests, and lossless PNG16 decoding. Interactive dialogs and GPU rendering were not exercised.
+### Vegetation points
+
+PointSet CSV/JSON outputs create one `MultiMeshInstance3D` per species under the imported scene. Replace its embedded placeholder cone mesh with your species mesh at nominal size; instances retain their positions, rotations and uniform scales. The Godot frame uses X and Z horizontally, with source Y increasing along +Z and height along +Y. See [points-format.md](../points-format.md).
+
+The `tests/godot_check.gd` 5,000/1,000,000-point checks cover saved-scene reload and every transform, but **were not run on Windows 26 September 2026** (Godot executable unavailable). The <30 s target is unverified here.
