@@ -110,16 +110,27 @@ jobs:
       - run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq unzip xvfb xauth vulkan-tools mesa-vulkan-drivers libvulkan1 libgl1 libx11-6 libxcursor1 libxinerama1 libxrandr2 libxi6 libxext6 libxrender1 libfontconfig1
+      # One Xvfb for the whole job, waited on until its socket exists. xvfb-run -a
+      # sometimes hands the command a display the server is not accepting yet.
+      - name: Start Xvfb
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
+          for _ in $(seq 100); do
+            [ -S /tmp/.X11-unix/X99 ] && break
+            sleep 0.1
+          done
+          if [ ! -S /tmp/.X11-unix/X99 ]; then cat /tmp/xvfb.log; exit 1; fi
+          echo DISPLAY=:99 >> "$GITHUB_ENV"
       - name: Check Mesa Vulkan driver
         run: |
           ls -l "$VK_DRIVER_FILES"
-          xvfb-run -a vulkaninfo --summary
+          vulkaninfo --summary
       - name: Compare GPU kernels with CPU on Mesa lavapipe
         run: |
           GODOT="$(scripts/fetch-godot.sh)"
           cargo build -p terrain-godot
           "$GODOT" --headless --path app --import || true
-          xvfb-run -a "$GODOT" --path app --rendering-driver vulkan --script res://tests/gpu_test.gd
+          "$GODOT" --path app --rendering-driver vulkan --script res://tests/gpu_test.gd
 
   lib-linux:
     if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
