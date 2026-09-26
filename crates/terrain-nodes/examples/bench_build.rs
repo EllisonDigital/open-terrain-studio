@@ -17,7 +17,10 @@ use terrain_core::{EvalCache, EvalOptions, ParamValue, Project};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let resolution: u32 = args.first().map(|v| v.parse().expect("resolution")).unwrap_or(8193);
+    let resolution: u32 = args
+        .first()
+        .map(|v| v.parse().expect("resolution"))
+        .unwrap_or(8193);
     let folder = args.get(1).cloned().unwrap_or_else(|| "bench_build".into());
     let reg = terrain_nodes::registry();
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/examples/river_coast.otstudio");
@@ -37,7 +40,10 @@ fn main() {
     // avoiding the one before.
     let (terrain, rivers, snow) = (("n_0006", "height"), ("n_0003", "river"), ("n_0006", "snow"));
     let mut previous: Option<String> = None;
-    for (k, kind) in ["vegetation.trees", "vegetation.shrubs", "vegetation.grass"].iter().enumerate() {
+    for (k, kind) in ["vegetation.trees", "vegetation.shrubs", "vegetation.grass"]
+        .iter()
+        .enumerate()
+    {
         let id = p.graph.add_node(&reg, kind, [1200.0, 400.0 * k as f32]).unwrap();
         p.graph.connect(&reg, terrain.0, terrain.1, &id, "in").unwrap();
         p.graph.connect(&reg, rivers.0, rivers.1, &id, "water").unwrap();
@@ -47,7 +53,9 @@ fn main() {
         }
         if *kind == "vegetation.grass" {
             // Sparser than the default, to keep the point file manageable.
-            p.graph.set_param(&reg, &id, "spacing_m", ParamValue::Float(4.0)).unwrap();
+            p.graph
+                .set_param(&reg, &id, "spacing_m", ParamValue::Float(4.0))
+                .unwrap();
         }
         p.set_export(&id, "density", "png16", true).unwrap();
         p.set_export(&id, "points", "csv", true).unwrap();

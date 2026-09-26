@@ -376,6 +376,27 @@ func run() -> void:
 	main.project.set_build_file_tiles(false, 257, "{name}_x{x}_y{y}")
 	main._message.hide()
 
+	# Background build: previews keep working while a large build runs, and
+	# the build can be cancelled without writing anything.
+	var big_out := OS.get_user_data_dir().path_join("ui_build_cancel")
+	main._start_build(4609, big_out)
+	check(main.exporter.is_busy() and main._build_progress.visible, "large build running")
+	await frames(10)
+	main.preview_resolution = 256
+	main._request_preview()
+	check(await wait_preview(main), "preview while building")
+	check(main.exporter.is_busy(), "build still running after the preview")
+	main._cancel_build()
+	for i in 1200:
+		await process_frame
+		if not main.exporter.is_busy():
+			break
+	check(not main.exporter.is_busy(), "build stopped")
+	check(main._status_label.text.contains("cancelled"), "cancel reported: " + main._status_label.text)
+	check(not FileAccess.file_exists(big_out.path_join("build.json")), "cancelled build wrote nothing")
+	check(not main._build_progress.visible, "build progress hidden")
+	main.preview_resolution = 512
+
 	# Cache settings apply without errors, and results spill to disk.
 	main._open_cache_dialog()
 	await frames(2)

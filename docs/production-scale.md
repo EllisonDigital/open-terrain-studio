@@ -83,6 +83,12 @@ million values are written with the same writers as untiled builds.
 
 `build.json` gains `computed_in_tiles` (the tile size) for tiled builds.
 
+## Background builds
+
+Builds and exports run on their own threads (all cores but two), so previews stay responsive, and
+show their own progress bar on the Build tab and in the status bar. The graph stays editable: a build
+uses the project as it was when it started. *Cancel* stops it and writes nothing.
+
 ## Tile files (Unreal World Partition)
 
 *Write images as tiles* on the Build tab writes each image as a grid of files instead of one. Tiles

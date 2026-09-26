@@ -7,6 +7,7 @@ signal build_requested(resolution: int, folder: String)
 signal view_requested(node_id: String)
 signal export_toggled(node_id: String, port: String, format: String, on: bool)
 signal builds_on_gpu_toggled(on: bool)
+signal cancel_requested
 
 const RESOLUTIONS := [512, 1009, 1024, 2017, 2048, 4033, 4096, 8129, 8192, 16129, 16384]
 const UNREAL_SIZES := [1009, 2017, 4033, 8129, 16129]
@@ -25,6 +26,9 @@ var busy := false:
 		busy = v
 		if _build_button != null:
 			_build_button.disabled = v or _count == 0
+			_running.visible = v
+			if v:
+				_run_progress.value = 0
 
 var _box: VBoxContainer
 var _list: VBoxContainer
@@ -38,6 +42,8 @@ var _file_tiles: CheckBox
 var _file_tile_size: OptionButton
 var _pattern: LineEdit
 var _tiles_note: Label
+var _running: HBoxContainer
+var _run_progress: ProgressBar
 var _count := 0
 
 
@@ -153,6 +159,21 @@ func _ready() -> void:
 	_build_button.pressed.connect(func():
 		build_requested.emit(RESOLUTIONS[_res.selected], _folder.text.strip_edges()))
 	_box.add_child(_build_button)
+
+	# Shown while a build runs; the graph stays editable meanwhile.
+	_running = HBoxContainer.new()
+	_running.visible = false
+	_run_progress = ProgressBar.new()
+	_run_progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_run_progress.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_running.add_child(_run_progress)
+	var cancel := Button.new()
+	cancel.text = "Cancel"
+	cancel.tooltip_text = "Stop the build. Nothing is written."
+	cancel.pressed.connect(func(): cancel_requested.emit())
+	_running.add_child(cancel)
+	_box.add_child(_running)
+	_box.add_child(_note("You can keep editing while a build runs: it builds the project as it was when you pressed Build."))
 
 
 func _label(text: String) -> Label:
@@ -284,3 +305,8 @@ func _export_row(e: Dictionary) -> Control:
 		h.add_child(cb)
 	v.add_child(h)
 	return panel
+
+
+## Progress of the running build, 0..1.
+func set_progress(fraction: float) -> void:
+	_run_progress.value = fraction * 100.0

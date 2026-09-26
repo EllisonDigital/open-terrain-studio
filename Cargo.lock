@@ -536,6 +536,7 @@ name = "terrain-godot"
 version = "0.2.0"
 dependencies = [
  "godot",
+ "rayon",
  "serde_json",
  "terrain-core",
  "terrain-nodes",

@@ -63,6 +63,9 @@ var settings := ConfigFile.new()
 var _status_label: Label
 var _stats_label: Label
 var _progress: ProgressBar
+## Progress of a build or export, apart from the preview's.
+var _build_progress: ProgressBar
+var _build_cancel: Button
 var _open_dialog: FileDialog
 var _save_dialog: FileDialog
 var _export_dialog: ConfirmationDialog
@@ -107,7 +110,7 @@ func _ready() -> void:
 	add_child(builder)
 
 	exporter = TerrainExporter.new()
-	exporter.progress.connect(func(f): _progress.value = f * 100.0)
+	exporter.progress.connect(_on_export_progress)
 	exporter.export_finished.connect(_on_export_finished)
 	add_child(exporter)
 
@@ -258,6 +261,7 @@ func _build_ui() -> void:
 		_save_settings()
 		TerrainBuilder.set_builds_on_gpu(on))
 	build_panel.build_requested.connect(_start_build)
+	build_panel.cancel_requested.connect(_cancel_build)
 	build_panel.export_toggled.connect(_on_export_toggled)
 	build_panel.view_requested.connect(func(id):
 		graph_panel.select_node(id)
@@ -287,6 +291,17 @@ func _build_ui() -> void:
 	_progress.show_percentage = false
 	_progress.visible = false
 	sb.add_child(_progress)
+	_build_progress = ProgressBar.new()
+	_build_progress.custom_minimum_size = Vector2(140, 0)
+	_build_progress.tooltip_text = "Build progress"
+	_build_progress.visible = false
+	sb.add_child(_build_progress)
+	_build_cancel = Button.new()
+	_build_cancel.text = "Cancel build"
+	_build_cancel.flat = true
+	_build_cancel.visible = false
+	_build_cancel.pressed.connect(_cancel_build)
+	sb.add_child(_build_cancel)
 	root.add_child(status_bar)
 
 
@@ -954,8 +969,7 @@ func _start_export() -> void:
 	project.set_build_resolution(res)
 	project.set_build_folder(folder)
 	if exporter.request_export(project, viewed_id, _viewed_port(), res, folder, formats):
-		_progress.visible = true
-		_progress.value = 0
+		_show_build_running(true)
 		_set_status("Exporting at %d²…" % res)
 
 
@@ -972,22 +986,43 @@ func _start_build(resolution: int, folder: String) -> void:
 	project.set_build_resolution(resolution)
 	project.set_build_folder(folder)
 	if exporter.request_build(project, resolution, folder):
-		build_panel.busy = true
-		_progress.visible = true
-		_progress.value = 0
+		_show_build_running(true)
 		_set_status("Building %d output%s at %d²…" % [project.get_exports().size(), "" if project.get_exports().size() == 1 else "s", resolution])
 
 
 func _on_export_finished(ok: bool, message: String, files: PackedStringArray) -> void:
-	_progress.visible = false
-	build_panel.busy = false
+	_show_build_running(false)
 	build_panel.refresh()
 	_update_title()
-	if ok:
+	if not ok and message.contains("cancelled"):
+		_set_status("Build cancelled. Nothing was written.")
+	elif ok:
 		_set_status("Exported %d files to %s" % [files.size(), files[0].get_base_dir()])
 		_show_message("Export complete", "Written:\n" + "\n".join(Array(files).map(func(f): return String(f).get_file())))
 	else:
 		_show_message("Export failed", message)
+
+
+## Builds and exports run in the background: show their own progress and a
+## Cancel button, so previews can carry on meanwhile.
+func _show_build_running(on: bool) -> void:
+	build_panel.busy = on
+	_build_progress.visible = on
+	_build_progress.value = 0
+	_build_cancel.visible = on
+	_build_cancel.disabled = false
+
+
+func _on_export_progress(fraction: float) -> void:
+	_build_progress.value = fraction * 100.0
+	build_panel.set_progress(fraction)
+
+
+func _cancel_build() -> void:
+	if exporter.is_busy():
+		exporter.cancel()
+		_build_cancel.disabled = true
+		_set_status("Cancelling the build…")
 
 
 # ---- menus ----------------------------------------------------------------
