@@ -192,8 +192,13 @@ impl EvalCache {
             return;
         };
         for (key, outputs, last_used) in evicted {
-            // GPU results would need reading back first: let them go.
-            if outputs.values().any(|v| matches!(v, Value::Gpu(..))) {
+            // GPU results would need reading back first, and the many tile
+            // results of a large build are rarely asked for again: let
+            // them go.
+            if outputs
+                .values()
+                .any(|v| matches!(v, Value::Gpu(..)) || v.spec().window.is_some())
+            {
                 continue;
             }
             let path = spill_path(&dir, key);
