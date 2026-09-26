@@ -6,6 +6,7 @@
 //!
 //! See `docs/ARCHITECTURE.md` for the design this crate implements.
 
+pub mod assemble;
 pub mod cache;
 pub mod error;
 pub mod eval;

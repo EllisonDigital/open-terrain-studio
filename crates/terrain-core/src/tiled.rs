@@ -474,7 +474,14 @@ impl Streams {
             }
             let grid = p.world_spec.map(|g| vec![0.0f32; g.len()]);
             let range = (f32::INFINITY, f32::NEG_INFINITY);
-            ports.insert(port.key.clone(), Stream { ty: port.ty, grid, range });
+            ports.insert(
+                port.key.clone(),
+                Stream {
+                    ty: port.ty,
+                    grid,
+                    range,
+                },
+            );
         }
         Ok(Self { ports })
     }

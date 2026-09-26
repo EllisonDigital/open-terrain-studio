@@ -297,3 +297,100 @@ fn global_nodes_close_below_simulation_resolution() {
         text.join("\n")
     );
 }
+
+/// A build above the tiling threshold (4,609² in tiles of 1,500) is
+/// bit-identical to an untiled evaluation, auto-range Levels included.
+#[test]
+fn large_builds_are_tiled_and_match() {
+    use terrain_core::export::build_marked;
+    use terrain_core::import::read_height_image;
+    let reg = registry();
+    let mut p = Project::default();
+    let fbm = p.graph.add_node(&reg, "noise.fbm", [0.0, 0.0]).unwrap();
+    let blur = p.graph.add_node(&reg, "adjust.blur", [0.0, 0.0]).unwrap();
+    let levels = p.graph.add_node(&reg, "adjust.levels", [0.0, 0.0]).unwrap();
+    p.graph.connect(&reg, &fbm, "out", &blur, "in").unwrap();
+    p.graph.connect(&reg, &blur, "out", &levels, "in").unwrap();
+    p.graph
+        .set_param(&reg, &fbm, "octaves", ParamValue::Int(3))
+        .unwrap();
+    p.set_export(&levels, "out", "exr32", true).unwrap();
+    p.build.tile_size = 1500;
+    let res = 4609;
+    let dir = temp_dir("tiled-build");
+    let written = build_marked(&p, &reg, res, &dir, &EvalOptions::default()).unwrap();
+    let info: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("build.json")).unwrap()).unwrap();
+    assert_eq!(info["computed_in_tiles"], 1500);
+    let exr = written
+        .iter()
+        .find(|w| w.extension().is_some_and(|e| e == "exr"))
+        .unwrap();
+    let image = read_height_image(exr).unwrap();
+    assert_eq!((image.width, image.height), (res, res));
+
+    let spec = GridSpec::full_world(&p.world, res).unwrap();
+    let whole = evaluate_node(&p.graph, &reg, &p.world, spec, &levels, &EvalOptions::default()).unwrap();
+    let expected = whole["out"].samples();
+    let differing = image
+        .data
+        .iter()
+        .zip(expected)
+        .filter(|(a, b)| a.to_bits() != b.to_bits())
+        .count();
+    assert_eq!(differing, 0, "{differing} samples differ from the untiled result");
+    assert!(
+        std::fs::read_dir(&dir)
+            .unwrap()
+            .all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".raw"))
+    );
+}
+
+/// Tile files share their edge samples, are named with the pattern, and are
+/// listed in build.json with their place in the whole build.
+#[test]
+fn builds_write_tile_files() {
+    use terrain_core::export::build_marked;
+    use terrain_core::import::read_height_image;
+    use terrain_core::project::FileTiles;
+    let reg = registry();
+    let mut p = Project::default();
+    let fbm = p.graph.add_node(&reg, "noise.fbm", [0.0, 0.0]).unwrap();
+    p.set_export(&fbm, "out", "exr32", true).unwrap();
+    p.build.file_tiles = Some(FileTiles {
+        size: 65,
+        pattern: "{name}_x{x}_y{y}".into(),
+    });
+    let dir = temp_dir("tile-files");
+    let res = 129; // 2 × (65 - 1) + 1
+    build_marked(&p, &reg, res, &dir, &EvalOptions::default()).unwrap();
+    let info: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("build.json")).unwrap()).unwrap();
+    assert_eq!(info["file_tiles"]["columns"], 2);
+    assert_eq!(info["file_tiles"]["even"], true);
+    let files = info["files"].as_array().unwrap();
+    assert_eq!(files.len(), 4);
+    let spec = GridSpec::full_world(&p.world, res).unwrap();
+    let whole = evaluate_node(&p.graph, &reg, &p.world, spec, &fbm, &EvalOptions::default()).unwrap();
+    let whole = whole["out"].grid();
+    for f in files {
+        let name = f["file"].as_str().unwrap();
+        let (tx, ty) = (f["tile"][0].as_u64().unwrap(), f["tile"][1].as_u64().unwrap());
+        assert!(name.ends_with(&format!("_x{tx}_y{ty}.exr")), "{name}");
+        let origin = [
+            f["tile_origin"][0].as_u64().unwrap() as u32,
+            f["tile_origin"][1].as_u64().unwrap() as u32,
+        ];
+        assert_eq!(origin, [tx as u32 * 64, ty as u32 * 64]);
+        let img = read_height_image(&dir.join(name)).unwrap();
+        assert_eq!((img.width, img.height), (65, 65));
+        for j in 0..65 {
+            for i in 0..65 {
+                assert_eq!(
+                    img.data[(j * 65 + i) as usize],
+                    whole.get(origin[0] + i, origin[1] + j)
+                );
+            }
+        }
+    }
+}
