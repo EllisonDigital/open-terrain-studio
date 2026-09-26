@@ -15,9 +15,10 @@ const PORT_COLORS := {
 	"heightfield": Color(0.95, 0.72, 0.30),
 	"mask": Color(0.55, 0.75, 0.95),
 	"color_map": Color(0.92, 0.45, 0.75),
+	"point_set": Color(0.45, 0.85, 0.40),
 }
-## Colour maps (slot type 2) only connect to colour inputs.
-const PORT_SLOT_TYPES := {"heightfield": 0, "mask": 1, "color_map": 2}
+## Colour maps (slot type 2) only connect to colour inputs, points (3) to points.
+const PORT_SLOT_TYPES := {"heightfield": 0, "mask": 1, "color_map": 2, "point_set": 3}
 ## Parameter ports (masks driving a value) get their own colour.
 const PARAM_PORT_COLOR := Color(0.55, 0.9, 0.6)
 const EXPORT_BADGE_COLOR := Color(0.55, 0.9, 0.6)

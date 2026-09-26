@@ -12,7 +12,7 @@
     ],
     "seed": 47019
   },
-  "next_node_id": 27,
+  "next_node_id": 32,
   "nodes": [
     {
       "id": "n_0001",
@@ -439,6 +439,114 @@
         "high_m": 4800,
         "falloff_m": 220
       }
+    },
+    {
+      "id": "n_001b",
+      "type": "data.wetness",
+      "type_version": 1,
+      "pos": [
+        4210,
+        520
+      ],
+      "params": {
+        "reach_m": 200
+      }
+    },
+    {
+      "id": "n_001c",
+      "type": "vegetation.trees",
+      "type_version": 1,
+      "pos": [
+        4530,
+        280
+      ],
+      "params": {
+        "species": "crown_pine",
+        "coverage": 0.8,
+        "water_preference": -0.1,
+        "spread_m": 30,
+        "patches": 0.4,
+        "patch_size_m": 260,
+        "slope_max_deg": 36,
+        "height_min_m": 600,
+        "height_max_m": 2650,
+        "height_falloff_m": 180,
+        "avoid_peaks": 0.4,
+        "dead_zones": 0.6,
+        "dead_slope_deg": 36,
+        "spacing_m": 9,
+        "scale_min": 0.8,
+        "scale_max": 1.3
+      }
+    },
+    {
+      "id": "n_001d",
+      "type": "vegetation.trees",
+      "type_version": 1,
+      "pos": [
+        4530,
+        640
+      ],
+      "params": {
+        "species": "valley_birch",
+        "coverage": 0.75,
+        "water_preference": 0.75,
+        "spread_m": 20,
+        "patches": 0.5,
+        "patch_size_m": 120,
+        "slope_max_deg": 28,
+        "height_max_m": 1500,
+        "height_falloff_m": 150,
+        "avoid_peaks": 0.5,
+        "dead_zones": 0.4,
+        "spacing_m": 8,
+        "scale_min": 0.7,
+        "scale_max": 1.15
+      }
+    },
+    {
+      "id": "n_001e",
+      "type": "vegetation.shrubs",
+      "type_version": 1,
+      "pos": [
+        4850,
+        460
+      ],
+      "params": {
+        "species": "krummholz",
+        "coverage": 0.7,
+        "water_preference": 0.1,
+        "patches": 0.55,
+        "patch_size_m": 80,
+        "slope_max_deg": 42,
+        "height_min_m": 1800,
+        "height_max_m": 3300,
+        "height_falloff_m": 200,
+        "occupied_mode": "intermingle",
+        "dead_zones": 0.4,
+        "spacing_m": 5,
+        "scale_min": 0.6,
+        "scale_max": 1.4
+      }
+    },
+    {
+      "id": "n_001f",
+      "type": "vegetation.debris",
+      "type_version": 1,
+      "pos": [
+        4850,
+        820
+      ],
+      "params": {
+        "species": "boulder",
+        "coverage": 0.8,
+        "slope_min_deg": 34,
+        "reach_m": 100,
+        "dead_zone_weight": 0.8,
+        "spacing_m": 6,
+        "scale_min": 0.4,
+        "scale_max": 2.5
+      }
     }
   ],
   "links": [
@@ -791,6 +899,126 @@
         "n_001a",
         "in"
       ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_001b",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_001c",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_001d",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_001e",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0017",
+        "out"
+      ],
+      "to": [
+        "n_001f",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_001b",
+        "wetness"
+      ],
+      "to": [
+        "n_001c",
+        "water"
+      ]
+    },
+    {
+      "from": [
+        "n_001b",
+        "wetness"
+      ],
+      "to": [
+        "n_001d",
+        "water"
+      ]
+    },
+    {
+      "from": [
+        "n_001b",
+        "wetness"
+      ],
+      "to": [
+        "n_001e",
+        "water"
+      ]
+    },
+    {
+      "from": [
+        "n_001c",
+        "occupied"
+      ],
+      "to": [
+        "n_001d",
+        "occupied"
+      ]
+    },
+    {
+      "from": [
+        "n_001d",
+        "occupied"
+      ],
+      "to": [
+        "n_001e",
+        "occupied"
+      ]
+    },
+    {
+      "from": [
+        "n_0016",
+        "debris"
+      ],
+      "to": [
+        "n_001f",
+        "talus"
+      ]
+    },
+    {
+      "from": [
+        "n_001c",
+        "dead_zones"
+      ],
+      "to": [
+        "n_001f",
+        "dead_zones"
+      ]
     }
   ],
   "exports": [
@@ -843,6 +1071,46 @@
       "node": "n_001a",
       "port": "out",
       "format": "png16"
+    },
+    {
+      "node": "n_001c",
+      "port": "density",
+      "format": "png8"
+    },
+    {
+      "node": "n_001c",
+      "port": "points",
+      "format": "csv"
+    },
+    {
+      "node": "n_001d",
+      "port": "density",
+      "format": "png8"
+    },
+    {
+      "node": "n_001d",
+      "port": "points",
+      "format": "csv"
+    },
+    {
+      "node": "n_001e",
+      "port": "density",
+      "format": "png8"
+    },
+    {
+      "node": "n_001e",
+      "port": "points",
+      "format": "csv"
+    },
+    {
+      "node": "n_001f",
+      "port": "density",
+      "format": "png8"
+    },
+    {
+      "node": "n_001f",
+      "port": "points",
+      "format": "csv"
     }
   ],
   "build": {

@@ -3,11 +3,39 @@ use std::sync::Arc;
 use godot::classes::Image;
 use godot::classes::image::Format;
 use godot::prelude::*;
-use terrain_core::{Grid, PortType, Value};
+use terrain_core::{Grid, PointSet, PortType, Value};
+
+/// Points of one vegetation or debris node, to draw in the 3D view.
+pub struct VegetationLayer {
+    pub node: String,
+    /// Placeholder shape: "tree", "shrub", "grass" or "rock".
+    pub kind: &'static str,
+    pub points: Arc<PointSet>,
+}
+
+impl VegetationLayer {
+    /// The placeholder shape for a node type.
+    pub fn kind_of(type_id: &str) -> &'static str {
+        match type_id {
+            "vegetation.trees" => "tree",
+            "vegetation.shrubs" => "shrub",
+            "vegetation.grass" => "grass",
+            _ => "rock",
+        }
+    }
+}
 
 /// What a preview job produces.
 pub struct PreviewData {
     pub value: Value,
+    /// For a point set: the points as a mask (1 at each point's nearest
+    /// sample), shown in place of the points themselves.
+    pub display: Option<Arc<Grid>>,
+    /// True if `value` is the ecosystem data view of a population (red =
+    /// dead zones, green = density, blue = water influence).
+    pub data_view: bool,
+    /// Points of the viewed node and the vegetation nodes upstream of it.
+    pub vegetation: Vec<VegetationLayer>,
     /// For a mask or colour map: the terrain it was computed from, and that
     /// node's id.
     pub base: Option<(Arc<Grid>, String)>,
@@ -68,9 +96,11 @@ pub struct TerrainPreview {
 
 impl TerrainPreview {
     pub(crate) fn create(data: PreviewData, node_id: &str, port: &str, generation: i64) -> Gd<Self> {
-        let (min, max) = data
-            .value
-            .samples()
+        let samples = match &data.display {
+            Some(g) => &g.data,
+            None => data.value.samples(),
+        };
+        let (min, max) = samples
             .iter()
             .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| {
                 (lo.min(v), hi.max(v))
@@ -94,10 +124,72 @@ impl TerrainPreview {
     /// 0..1) for a colour map.
     #[func]
     fn get_image(&self) -> Option<Gd<Image>> {
+        if let Some(g) = &self.data.display {
+            return grid_image(g);
+        }
         match self.data.value.color() {
             Some(c) => floats_image(c.spec.width, c.spec.height, &c.data, Format::RGBAF),
             None => grid_image(self.data.value.grid()),
         }
+    }
+
+    /// For a point set: how many points it has. 0 otherwise.
+    #[func]
+    fn get_point_count(&self) -> i64 {
+        self.data.value.points().map_or(0, |p| p.len() as i64)
+    }
+
+    /// True if this is a population's ecosystem data view.
+    #[func]
+    fn is_data_view(&self) -> bool {
+        self.data.data_view
+    }
+
+    /// Points to draw in the 3D view: those of the viewed node and of the
+    /// vegetation nodes upstream of it. One dictionary per node: `node`,
+    /// `kind` ("tree", "shrub", "grass" or "rock"), `species`, `count` (all
+    /// its points) and `points` (x, y, z metres, rotation degrees and scale
+    /// for each point shown, as a PackedFloat32Array). At most
+    /// `max_points` are shown in total (0 = all): each node gets an equal
+    /// share, trees first, then shrubs, rocks and grass, and a node needing
+    /// less than its share passes the rest on. A thinned node keeps every
+    /// n-th point.
+    #[func]
+    fn get_vegetation(&self, max_points: i64) -> VarArray {
+        let priority = |kind: &str| match kind {
+            "tree" => 0,
+            "shrub" => 1,
+            "rock" => 2,
+            _ => 3,
+        };
+        let mut order: Vec<usize> = (0..self.data.vegetation.len()).collect();
+        order.sort_by_key(|&i| priority(self.data.vegetation[i].kind));
+        let mut strides = vec![1usize; order.len()];
+        if max_points > 0 {
+            let mut budget = max_points as usize;
+            for (k, &i) in order.iter().enumerate() {
+                let count = self.data.vegetation[i].points.len();
+                let share = (budget / (order.len() - k)).max(1);
+                strides[i] = count.div_ceil(share).max(1);
+                budget = budget.saturating_sub(count.div_ceil(strides[i]));
+            }
+        }
+        let mut arr = VarArray::new();
+        for (layer, &stride) in self.data.vegetation.iter().zip(&strides) {
+            let p = &layer.points;
+            let mut data = Vec::with_capacity(p.len() / stride * 5 + 5);
+            for i in (0..p.len()).step_by(stride) {
+                data.extend_from_slice(&p.data[i * 5..i * 5 + 5]);
+            }
+            let mut d = VarDictionary::new();
+            crate::convert::put(&mut d, "node", GString::from(layer.node.as_str()));
+            crate::convert::put(&mut d, "kind", GString::from(layer.kind));
+            crate::convert::put(&mut d, "species", GString::from(p.species.join(", ").as_str()));
+            crate::convert::put(&mut d, "count", p.len() as i64);
+            crate::convert::put(&mut d, "points", PackedFloat32Array::from(data.as_slice()));
+            arr.push(&d.to_variant());
+        }
+        arr
     }
 
     /// For a mask: the terrain it was computed from (heights in metres,
@@ -136,6 +228,12 @@ impl TerrainPreview {
         self.data.value.spec().width as i32
     }
 
+    /// Total number of vegetation points behind [`Self::get_vegetation`].
+    #[func]
+    fn get_vegetation_count(&self) -> i64 {
+        self.data.vegetation.iter().map(|l| l.points.len() as i64).sum()
+    }
+
     /// Lowest value in the data (metres for heightfields).
     #[func]
     fn get_min(&self) -> f32 {
@@ -147,14 +245,11 @@ impl TerrainPreview {
         self.max
     }
 
-    /// "heightfield", "mask" or "color_map".
+    /// "heightfield", "mask", "color_map" or "point_set". A point set is
+    /// shown as a mask of its points (see [`Self::get_image`]).
     #[func]
     fn get_port_type(&self) -> GString {
-        match self.data.value.port_type() {
-            PortType::Heightfield => "heightfield".into(),
-            PortType::Mask => "mask".into(),
-            PortType::ColorMap => "color_map".into(),
-        }
+        self.data.value.port_type().key().into()
     }
 
     #[func]
@@ -205,6 +300,10 @@ impl TerrainPreview {
     /// heightfield or mask, the value in every channel.
     #[func]
     fn sample_color(&self, x_m: f64, y_m: f64) -> Color {
+        if let Some(g) = &self.data.display {
+            let v = g.sample_bilinear_m(x_m, y_m);
+            return Color::from_rgba(v, v, v, 1.0);
+        }
         match self.data.value.color() {
             Some(c) => {
                 let [r, g, b, a] = c.sample_bilinear_m(x_m, y_m);

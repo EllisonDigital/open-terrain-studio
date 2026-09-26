@@ -2,12 +2,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use godot::prelude::*;
-use terrain_core::{EvalOptions, Grid, GridSpec, PortType, evaluate_node};
+use terrain_core::{ColorGrid, EvalOptions, Grid, GridSpec, PortType, Value, evaluate_node};
 
 use crate::convert::put;
 use crate::gpu;
 use crate::jobs::Job;
-use crate::preview::{PreviewData, TerrainPreview};
+use crate::preview::{PreviewData, TerrainPreview, VegetationLayer};
 use crate::project::TerrainProject;
 use crate::{cache, registry};
 
@@ -26,6 +26,8 @@ const WATER_MIN_DEPTH_M: f32 = 0.01;
 #[class(base=Node)]
 pub struct TerrainBuilder {
     generation: i64,
+    /// Show populations as their ecosystem data view (see [`Self::set_data_view`]).
+    data_view: bool,
     job: Option<(Job<PreviewData>, String, String)>,
     base: Base<Node>,
 }
@@ -35,6 +37,7 @@ impl INode for TerrainBuilder {
     fn init(base: Base<Node>) -> Self {
         Self {
             generation: 0,
+            data_view: false,
             job: None,
             base,
         }
@@ -101,6 +104,7 @@ impl TerrainBuilder {
         let (snapshot, base_dir) = project.bind().snapshot();
         let (node, port_s) = (node_id.to_string(), port.to_string());
         let (n2, p2) = (node.clone(), port_s.clone());
+        let data_view = self.data_view;
         let job = Job::spawn(generation, move |cancel, progress| {
             let started = Instant::now();
             let gpu = gpu::for_preview();
@@ -130,9 +134,53 @@ impl TerrainBuilder {
                     Ok(value.clone())
                 };
             let grid_of = |node: &str, port: &str| eval(node, port, None).map(|v| v.grid().clone());
-            let value = eval(&n2, &p2, Some(progress))?;
+            let mut value = eval(&n2, &p2, Some(progress))?;
+            // A population's ecosystem data view: red = dead zones, green =
+            // density, blue = water influence. Its outputs are cached together.
+            let mut is_data_view = false;
+            let population = snapshot
+                .graph
+                .node(&n2)
+                .and_then(|n| registry().schema(&n.type_id))
+                .is_some_and(|s| {
+                    ["density", "dead_zones", "water"]
+                        .iter()
+                        .all(|k| s.output(k).is_some_and(|o| o.ty == PortType::Mask))
+                });
+            if data_view && population {
+                let (density, dead, water) = (
+                    grid_of(&n2, "density")?,
+                    grid_of(&n2, "dead_zones")?,
+                    grid_of(&n2, "water")?,
+                );
+                value = Value::ColorMap(Arc::new(ColorGrid::from_fn_indexed(spec, |i, _, _| {
+                    [dead.data[i], density.data[i], water.data[i], 1.0]
+                })));
+                is_data_view = true;
+            }
             let ty = value.port_type();
             let n = spec.len();
+            // Points of this node and the vegetation upstream, for the 3D view.
+            let mut vegetation = Vec::new();
+            for source in snapshot.graph.vegetation_sources(registry(), &n2) {
+                let Ok(points) = eval(&source, "points", None) else {
+                    continue;
+                };
+                let Some(points) = points.points().cloned() else {
+                    continue;
+                };
+                let type_id = snapshot
+                    .graph
+                    .node(&source)
+                    .map(|n| n.type_id.as_str())
+                    .unwrap_or("");
+                vegetation.push(VegetationLayer {
+                    kind: VegetationLayer::kind_of(type_id),
+                    node: source,
+                    points,
+                });
+            }
+            let display = value.points().map(|p| Arc::new(p.rasterise(spec)));
             // The base terrain is upstream, so it is normally already cached.
             let base: Option<(Arc<Grid>, String)> = if ty != PortType::Heightfield {
                 snapshot
@@ -182,6 +230,9 @@ impl TerrainBuilder {
             };
             Ok(PreviewData {
                 value,
+                display,
+                data_view: is_data_view,
+                vegetation,
                 base,
                 water,
                 snow,
@@ -192,6 +243,14 @@ impl TerrainBuilder {
         });
         self.job = Some((job, node, port_s));
         generation
+    }
+
+    /// Show populations (Trees, Shrubs, Grass) as their ecosystem data view,
+    /// a colour map of what shapes them: red = dead zones, green = density,
+    /// blue = water influence. Affects the next request.
+    #[func]
+    fn set_data_view(&mut self, on: bool) {
+        self.data_view = on;
     }
 
     /// Stop the running request, if any. No signal is emitted for it.

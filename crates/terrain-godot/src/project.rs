@@ -324,7 +324,8 @@ impl TerrainProject {
     // ---- export marks ---------------------------------------------------
 
     /// Outputs marked for export: one dictionary per output with node, port,
-    /// label (the node type's label) and formats (PackedStringArray).
+    /// label (the node type's label), type (the output's port type, e.g.
+    /// "point_set") and formats (PackedStringArray).
     #[func]
     fn get_exports(&self) -> VarArray {
         let s = lock(&self.shared);
@@ -337,14 +338,17 @@ impl TerrainProject {
         }
         let mut arr = VarArray::new();
         for (node, port, formats) in grouped {
-            let label = s
+            let schema = s
                 .project
                 .graph
                 .node(&node)
-                .and_then(|n| registry().schema(&n.type_id))
+                .and_then(|n| registry().schema(&n.type_id));
+            let label = schema
                 .map(|sc| sc.label.clone())
                 .unwrap_or_else(|| "Unknown".into());
+            let ty = schema.and_then(|sc| sc.output(&port)).map_or("", |o| o.ty.key());
             let mut d = VarDictionary::new();
+            put(&mut d, "type", ty);
             put(&mut d, "node", GString::from(node.as_str()));
             put(&mut d, "port", GString::from(port.as_str()));
             put(&mut d, "label", GString::from(label.as_str()));

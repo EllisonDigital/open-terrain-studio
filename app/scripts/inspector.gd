@@ -10,12 +10,23 @@ signal port_toggled(node_id: String, key: String, exposed: bool)
 signal export_toggled(node_id: String, port: String, format: String, on: bool)
 signal send_to_colour(node_id: String, port: String)
 signal world_changed
+## A species preset (YAML text) was chosen for a vegetation node.
+signal species_preset_chosen(node_id: String, text: String)
 
 const EXPORT_FORMATS := [
 	["exr32", "EXR", "32-bit float EXR: heights in metres; colours RGBA"],
 	["png16", "PNG 16", "16-bit PNG: heights over the world height range; colours RGBA"],
 	["png8", "PNG 8", "8-bit PNG, e.g. colour and splat maps for engines"],
 ]
+const POINT_EXPORT_FORMATS := [
+	["csv", "CSV", "Points as CSV: x, y, z (metres), rotation_deg, scale, species"],
+	["json", "JSON", "Points as JSON, same columns as the CSV"],
+]
+## Species presets bundled with the app (YAML, see docs/vegetation.md).
+const SPECIES_DIR := "res://examples/species"
+
+## Bundled presets, read once: [{path, name, node, biome, description}].
+static var _species_presets: Array = []
 
 var project: TerrainProject
 var _box: VBoxContainer
@@ -23,6 +34,8 @@ var _node_id := ""
 var _controls := {} # param key -> control (for pushing back clamped values)
 var _file_dialog: FileDialog
 var _file_target: LineEdit
+var _preset_open_dialog: FileDialog
+var _preset_save_dialog: FileDialog
 
 
 func _ready() -> void:
@@ -44,6 +57,22 @@ func _ready() -> void:
 	_file_dialog.use_native_dialog = true
 	_file_dialog.file_selected.connect(_on_file_chosen)
 	add_child(_file_dialog)
+
+	_preset_open_dialog = FileDialog.new()
+	_preset_open_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_preset_open_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_preset_open_dialog.use_native_dialog = true
+	_preset_open_dialog.filters = PackedStringArray(["*.yaml, *.yml ; Species preset"])
+	_preset_open_dialog.file_selected.connect(func(path):
+		species_preset_chosen.emit(_node_id, FileAccess.get_file_as_string(path)))
+	add_child(_preset_open_dialog)
+	_preset_save_dialog = FileDialog.new()
+	_preset_save_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	_preset_save_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_preset_save_dialog.use_native_dialog = true
+	_preset_save_dialog.filters = _preset_open_dialog.filters
+	_preset_save_dialog.file_selected.connect(_save_species_preset)
+	add_child(_preset_save_dialog)
 
 
 ## Id of the node being shown, or "" for world settings.
@@ -175,6 +204,8 @@ func show_node(node: Dictionary, schema: Dictionary) -> void:
 	if schema.get("description", "") != "":
 		_note(schema["description"])
 	_box.add_child(HSeparator.new())
+	if node.get("category", "") == "Vegetation":
+		_add_preset_section(node)
 	var values: Dictionary = node["params"]
 	var exposed := Array(node.get("exposed", PackedStringArray()))
 	for p in schema["params"]:
@@ -238,6 +269,14 @@ func _add_param(p: Dictionary, value: Variant, exposed: bool) -> void:
 			control = ge
 		"file":
 			control = _file_control(value, p.get("filters", []), func(path): param_changed.emit(id, key, path))
+		"text":
+			var edit := LineEdit.new()
+			edit.text = value
+			edit.text_submitted.connect(func(t): param_changed.emit(id, key, t))
+			edit.focus_exited.connect(func():
+				if edit.text != value:
+					param_changed.emit(id, key, edit.text))
+			control = edit
 		_:
 			return
 	_controls[key] = control
@@ -308,7 +347,7 @@ func _add_export_section(node: Dictionary) -> void:
 			var l := Label.new()
 			l.text = o["label"]
 			h.add_child(l)
-		for f in EXPORT_FORMATS:
+		for f in (POINT_EXPORT_FORMATS if o["type"] == "point_set" else EXPORT_FORMATS):
 			var cb := CheckBox.new()
 			cb.text = f[1]
 			cb.tooltip_text = f[2]
@@ -326,7 +365,7 @@ func _add_export_section(node: Dictionary) -> void:
 func _add_colour_section(node: Dictionary) -> void:
 	if node.get("tab", "terrain") != "terrain":
 		return
-	var sendable: Array = node["outputs"].filter(func(o): return o["type"] != "color_map")
+	var sendable: Array = node["outputs"].filter(func(o): return o["type"] in ["heightfield", "mask"])
 	if sendable.is_empty():
 		return
 	_box.add_child(HSeparator.new())
@@ -340,6 +379,68 @@ func _add_colour_section(node: Dictionary) -> void:
 		var port: String = o["key"]
 		b.pressed.connect(func(): send_to_colour.emit(id, port))
 		_box.add_child(b)
+
+
+# ---- species presets --------------------------------------------------------
+
+## Bundled species presets, sorted by biome then name.
+static func species_presets() -> Array:
+	if _species_presets.is_empty():
+		for file in DirAccess.get_files_at(SPECIES_DIR):
+			if file.get_extension() not in ["yaml", "yml"]:
+				continue
+			var path := SPECIES_DIR.path_join(file)
+			var info: Dictionary = TerrainGraph.read_species_preset(FileAccess.get_file_as_string(path))
+			if info["ok"]:
+				info["path"] = path
+				_species_presets.append(info)
+		_species_presets.sort_custom(func(a, b):
+			return [a["biome"], a["name"]] < [b["biome"], b["name"]])
+	return _species_presets
+
+
+## Vegetation nodes: pick a species preset, load one from a file, or save one.
+func _add_preset_section(node: Dictionary) -> void:
+	var id: String = node["id"]
+	var ob := OptionButton.new()
+	ob.add_item("Choose a preset…")
+	ob.set_item_disabled(0, true)
+	var matching := species_presets().filter(func(p): return p["node"] == node["type"])
+	for p in matching:
+		ob.add_item("%s  (%s)" % [p["name"], p["biome"]])
+		ob.set_item_tooltip(ob.item_count - 1, p["description"])
+		ob.set_item_metadata(ob.item_count - 1, p["path"])
+	ob.select(0)
+	ob.item_selected.connect(func(i):
+		var path: String = ob.get_item_metadata(i)
+		species_preset_chosen.emit(id, FileAccess.get_file_as_string(path)))
+	var buttons := HBoxContainer.new()
+	var load_button := Button.new()
+	load_button.text = "Load…"
+	load_button.tooltip_text = "Apply a species preset file (.yaml)"
+	load_button.pressed.connect(func(): _preset_open_dialog.popup_centered_ratio(0.6))
+	buttons.add_child(load_button)
+	var save_button := Button.new()
+	save_button.text = "Save…"
+	save_button.tooltip_text = "Save these settings as a species preset file (.yaml)"
+	save_button.pressed.connect(func(): _preset_save_dialog.popup_centered_ratio(0.6))
+	buttons.add_child(save_button)
+	_row("Species preset", ob,
+			"Typical settings for a species. Applying one changes the settings below (undoable).", buttons)
+	if matching.is_empty():
+		_note("No bundled presets for this node.")
+
+
+func _save_species_preset(path: String) -> void:
+	if path.get_extension() not in ["yaml", "yml"]:
+		path += ".yaml"
+	var name := path.get_file().get_basename().replace("_", " ").capitalize()
+	var yaml: String = project.get_graph().make_species_preset(_node_id, name, "")
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null or yaml == "":
+		push_warning("Could not save species preset %s" % path)
+		return
+	f.store_string(yaml)
 
 
 func _seed_control(value: int, on_change: Callable) -> Control:
