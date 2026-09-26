@@ -8,8 +8,12 @@ signal view_requested(node_id: String)
 signal export_toggled(node_id: String, port: String, format: String, on: bool)
 signal builds_on_gpu_toggled(on: bool)
 
-const RESOLUTIONS := [512, 1009, 1024, 2017, 2048, 4033, 4096, 8129, 8192]
-const UNREAL_SIZES := [1009, 2017, 4033, 8129]
+const RESOLUTIONS := [512, 1009, 1024, 2017, 2048, 4033, 4096, 8129, 8192, 16129, 16384]
+const UNREAL_SIZES := [1009, 2017, 4033, 8129, 16129]
+## Builds over this many samples per side are computed in tiles.
+const TILED_ABOVE := 4097
+const COMPUTE_TILES := [[1024, "1,024 (least memory)"], [2048, "2,048"], [4096, "4,096 (fastest)"]]
+const FILE_TILE_SIZES := [505, 1009, 2017, 4033]
 const FORMATS := [["exr32", "EXR"], ["png16", "PNG 16"], ["png8", "PNG 8"]]
 const POINT_FORMATS := [["csv", "CSV"], ["json", "JSON"]]
 
@@ -29,6 +33,11 @@ var _folder: LineEdit
 var _build_button: Button
 var _summary: Label
 var _folder_dialog: FileDialog
+var _compute_tiles: OptionButton
+var _file_tiles: CheckBox
+var _file_tile_size: OptionButton
+var _pattern: LineEdit
+var _tiles_note: Label
 var _count := 0
 
 
@@ -55,7 +64,9 @@ func _ready() -> void:
 	_res = OptionButton.new()
 	for r in RESOLUTIONS:
 		_res.add_item("%d%s" % [r, "  (Unreal landscape size)" if r in UNREAL_SIZES else ""])
-	_res.item_selected.connect(func(i): project.set_build_resolution(RESOLUTIONS[i]))
+	_res.item_selected.connect(func(i):
+		project.set_build_resolution(RESOLUTIONS[i])
+		_update_tiles_note())
 	_box.add_child(_res)
 
 	_box.add_child(_label("Folder"))
@@ -97,6 +108,39 @@ func _ready() -> void:
 	_box.add_child(gpu)
 
 	_box.add_child(HSeparator.new())
+	_box.add_child(_label("Large builds"))
+	_box.add_child(_note("Builds over %s samples are computed in tiles of" % _thousands(TILED_ABOVE)))
+	_compute_tiles = OptionButton.new()
+	for t in COMPUTE_TILES:
+		_compute_tiles.add_item(t[1])
+	_compute_tiles.tooltip_text = "Smaller tiles use less memory; larger ones repeat less work at their edges."
+	_compute_tiles.item_selected.connect(func(i): project.set_build_tile_size(COMPUTE_TILES[i][0]))
+	_box.add_child(_compute_tiles)
+
+	_file_tiles = CheckBox.new()
+	_file_tiles.text = "Write images as tiles"
+	_file_tiles.tooltip_text = "One file per tile instead of one per image, e.g. for Unreal World Partition.\nNeighbouring tiles share their edge row and column of samples."
+	_file_tiles.toggled.connect(func(_on): _store_file_tiles())
+	_box.add_child(_file_tiles)
+	var th := HBoxContainer.new()
+	var size_label := _label("Tile size")
+	size_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	th.add_child(size_label)
+	_file_tile_size = OptionButton.new()
+	for s in FILE_TILE_SIZES:
+		_file_tile_size.add_item(_thousands(s))
+	_file_tile_size.item_selected.connect(func(_i): _store_file_tiles())
+	th.add_child(_file_tile_size)
+	_box.add_child(th)
+	_pattern = LineEdit.new()
+	_pattern.custom_minimum_size = Vector2(0, 0)
+	_pattern.tooltip_text = "File name: {name} is the usual name, {x} and {y} the tile's column and row from 0."
+	_pattern.text_changed.connect(func(_t): _store_file_tiles())
+	_box.add_child(_pattern)
+	_tiles_note = _note("")
+	_box.add_child(_tiles_note)
+
+	_box.add_child(HSeparator.new())
 	_summary = _label("")
 	_box.add_child(_summary)
 	_list = VBoxContainer.new()
@@ -125,11 +169,70 @@ func _note(text: String) -> Label:
 	return l
 
 
+## 16384 -> "16,384".
+static func _thousands(n: int) -> String:
+	var s := str(n)
+	var out := ""
+	while s.length() > 3:
+		out = "," + s.right(3) + out
+		s = s.left(s.length() - 3)
+	return s + out
+
+
+func _store_file_tiles() -> void:
+	var pattern := _pattern.text.strip_edges()
+	if pattern == "":
+		pattern = "{name}_x{x}_y{y}"
+	project.set_build_file_tiles(_file_tiles.button_pressed, FILE_TILE_SIZES[_file_tile_size.selected], pattern)
+	_update_tiles_note()
+
+
+## Explain what the tile settings will do at the chosen resolution.
+func _update_tiles_note() -> void:
+	var res: int = project.get_build_resolution()
+	var lines: PackedStringArray = []
+	if res > TILED_ABOVE:
+		lines.append("This build is computed in tiles; images are put together in the output folder while it runs (about %s of free space per image)." \
+				% _size_text(res * res * 4))
+	var enabled := _file_tiles.button_pressed
+	_file_tile_size.disabled = not enabled
+	_pattern.editable = enabled
+	if enabled:
+		var size: int = FILE_TILE_SIZES[_file_tile_size.selected]
+		var count := ceili(float(res - 1) / float(size - 1))
+		if (res - 1) % (size - 1) == 0:
+			lines.append("%d × %d tiles of %s samples: every tile the same size, ready for Unreal World Partition." % [count, count, _thousands(size)])
+		else:
+			var even := (res - 1) / (size - 1) * (size - 1) + 1
+			lines.append("%d × %d tiles; the last row and column are smaller. For equal tiles use a resolution of n × (%s − 1) + 1, e.g. %s." \
+					% [count, count, _thousands(size), _thousands(maxi(even, size))])
+	_tiles_note.text = "\n".join(lines)
+	_tiles_note.visible = lines.size() > 0
+
+
+static func _size_text(bytes: int) -> String:
+	if bytes >= 1 << 30:
+		return "%.1f GB" % (bytes / float(1 << 30))
+	return "%d MB" % (bytes >> 20)
+
+
 ## Reload everything from the project (after load, undo, or a mark change).
 func refresh() -> void:
 	_res.select(maxi(RESOLUTIONS.find(project.get_build_resolution()), 0))
 	if not _folder.has_focus():
 		_folder.text = project.get_build_folder()
+	var tile := project.get_build_tile_size()
+	var ci := 1
+	for i in COMPUTE_TILES.size():
+		if COMPUTE_TILES[i][0] == tile:
+			ci = i
+	_compute_tiles.select(ci)
+	var ft: Dictionary = project.get_build_file_tiles()
+	_file_tiles.set_pressed_no_signal(ft["enabled"])
+	_file_tile_size.select(maxi(FILE_TILE_SIZES.find(int(ft["size"])), 2))
+	if not _pattern.has_focus():
+		_pattern.text = ft["pattern"]
+	_update_tiles_note()
 	for c in _list.get_children():
 		_list.remove_child(c)
 		c.queue_free()

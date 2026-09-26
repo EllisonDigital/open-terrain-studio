@@ -276,7 +276,32 @@ impl TerrainBuilder {
         put(&mut d, "evictions", s.evictions as i64);
         put(&mut d, "entries", s.entries as i64);
         put(&mut d, "megabytes", s.bytes as f64 / (1024.0 * 1024.0));
+        put(&mut d, "disk_hits", s.disk_hits as i64);
+        put(&mut d, "disk_entries", s.disk_entries as i64);
+        put(&mut d, "disk_megabytes", s.disk_bytes as f64 / (1024.0 * 1024.0));
         d
+    }
+
+    /// Keep at most `memory_mb` of results in memory. With `disk_mb` above 0
+    /// and a `folder`, results pushed out of memory are kept there, up to
+    /// `disk_mb`, instead of being recomputed. Returns "" or an error.
+    #[func]
+    fn set_cache_limits(memory_mb: i64, disk_mb: i64, folder: GString) -> GString {
+        const MB: u64 = 1024 * 1024;
+        cache().set_budget((memory_mb.max(64) as u64 * MB) as usize);
+        let folder = folder.to_string();
+        let spill = (disk_mb > 0 && !folder.is_empty()).then(|| std::path::PathBuf::from(folder));
+        match cache().set_spill(spill, disk_mb.max(0) as u64 * MB) {
+            Ok(()) => GString::new(),
+            Err(e) => GString::from(e.to_string().as_str()),
+        }
+    }
+
+    /// Where the cache spills to unless the settings say otherwise.
+    #[func]
+    fn get_default_cache_folder() -> GString {
+        let dir = std::env::temp_dir().join("OpenTerrainStudio").join("cache");
+        GString::from(dir.to_string_lossy().as_ref())
     }
 
     /// The compute device: `state` ("starting", "ready" or "unavailable"),
