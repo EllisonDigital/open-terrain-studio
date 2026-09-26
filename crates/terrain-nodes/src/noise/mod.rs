@@ -150,6 +150,9 @@ impl NodeKind for Perlin {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let seed = ctx.seed;
         noise_heightfield(ctx, |x, y| basis::perlin(x, y, seed))
@@ -180,6 +183,9 @@ impl Default for Simplex {
 impl NodeKind for Simplex {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let seed = ctx.seed;
@@ -239,6 +245,9 @@ impl NodeKind for Fbm {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let seed = ctx.seed;
         let (basis, octaves, lacunarity, gain) = fractal(ctx);
@@ -273,6 +282,9 @@ impl NodeKind for ValueNoise {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let seed = ctx.seed;
         noise_heightfield(ctx, |x, y| basis::value(x, y, seed))
@@ -304,6 +316,9 @@ impl Default for Ridged {
 impl NodeKind for Ridged {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let seed = ctx.seed;
@@ -338,6 +353,9 @@ impl Default for Billow {
 impl NodeKind for Billow {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let seed = ctx.seed;
@@ -378,6 +396,9 @@ impl Default for DomainWarp {
 impl NodeKind for DomainWarp {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let seed = ctx.seed;
@@ -428,6 +449,9 @@ impl Default for Voronoi {
 impl NodeKind for Voronoi {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let seed = ctx.seed;

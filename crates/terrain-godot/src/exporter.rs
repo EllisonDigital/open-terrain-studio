@@ -108,25 +108,27 @@ impl TerrainExporter {
             PathBuf::from(folder.to_string()),
         );
         self.job = Some(Job::spawn(self.generation, move |cancel, progress| {
-            export_node(
-                &snapshot,
-                registry(),
-                &ExportRequest {
-                    node: &node,
-                    port: &port,
-                    resolution: resolution.max(2) as u32,
-                    folder: &folder,
-                    formats: &fmts,
-                },
-                &EvalOptions {
-                    cancel: Some(cancel),
-                    progress: Some(progress),
-                    cache: Some(cache()),
-                    base_dir: base_dir.as_deref(),
-                    gpu: gpu::for_build().as_ref(),
-                },
-            )
-            .map_err(|e| e.to_string())
+            build_pool().install(|| {
+                export_node(
+                    &snapshot,
+                    registry(),
+                    &ExportRequest {
+                        node: &node,
+                        port: &port,
+                        resolution: resolution.max(2) as u32,
+                        folder: &folder,
+                        formats: &fmts,
+                    },
+                    &EvalOptions {
+                        cancel: Some(cancel),
+                        progress: Some(progress),
+                        cache: Some(cache()),
+                        base_dir: base_dir.as_deref(),
+                        gpu: gpu::for_build().as_ref(),
+                    },
+                )
+                .map_err(|e| e.to_string())
+            })
         }));
         true
     }
@@ -144,27 +146,31 @@ impl TerrainExporter {
         let (snapshot, base_dir) = project.bind().snapshot();
         let folder = PathBuf::from(folder.to_string());
         self.job = Some(Job::spawn(self.generation, move |cancel, progress| {
-            build_marked(
-                &snapshot,
-                registry(),
-                resolution.max(2) as u32,
-                &folder,
-                &EvalOptions {
-                    cancel: Some(cancel),
-                    progress: Some(progress),
-                    cache: Some(cache()),
-                    base_dir: base_dir.as_deref(),
-                    gpu: gpu::for_build().as_ref(),
-                },
-            )
-            .map_err(|e| e.to_string())
+            build_pool().install(|| {
+                build_marked(
+                    &snapshot,
+                    registry(),
+                    resolution.max(2) as u32,
+                    &folder,
+                    &EvalOptions {
+                        cancel: Some(cancel),
+                        progress: Some(progress),
+                        cache: Some(cache()),
+                        base_dir: base_dir.as_deref(),
+                        gpu: gpu::for_build().as_ref(),
+                    },
+                )
+                .map_err(|e| e.to_string())
+            })
         }));
         true
     }
 
     #[func]
     fn cancel(&mut self) {
-        if let Some(job) = self.job.take() {
+        // Keep the job until its worker stops (it cleans up its temporary
+        // files); `export_finished` then reports it as cancelled.
+        if let Some(job) = &self.job {
             job.cancel();
         }
     }
@@ -173,4 +179,18 @@ impl TerrainExporter {
     fn is_busy(&self) -> bool {
         self.job.is_some()
     }
+}
+
+/// Threads for exports and builds: all but two cores, so previews stay
+/// responsive while a long build runs in the background.
+fn build_pool() -> &'static rayon::ThreadPool {
+    static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(cores.saturating_sub(2).max(1))
+            .thread_name(|i| format!("terrain-build-{i}"))
+            .build()
+            .expect("build thread pool")
+    })
 }

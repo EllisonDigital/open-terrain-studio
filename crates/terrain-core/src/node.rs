@@ -145,6 +145,24 @@ impl Value {
         }
     }
 
+    /// The part of this value inside `to`, a window of the same whole grid
+    /// inside this value's grid. Points outside it are dropped.
+    pub fn crop(&self, to: GridSpec) -> Value {
+        if self.spec() == to {
+            return self.clone();
+        }
+        match self {
+            Value::Heightfield(g) => Value::Heightfield(Arc::new(g.crop(to))),
+            Value::Mask(g) => Value::Mask(Arc::new(g.crop(to))),
+            Value::ColorMap(c) => Value::ColorMap(Arc::new(c.crop(to))),
+            Value::Points(p) => Value::Points(Arc::new(p.within(to))),
+            Value::Gpu(ty, g) => match ty {
+                PortType::Mask => Value::Mask(Arc::new(g.cpu().crop(to))),
+                _ => Value::Heightfield(Arc::new(g.cpu().crop(to))),
+            },
+        }
+    }
+
     /// Convert to another port type using the world height range. A GPU
     /// value is converted on the GPU (or, if that fails, on the CPU).
     pub fn convert(&self, to: PortType, world: &World) -> Value {
@@ -308,6 +326,140 @@ pub trait NodeKind: Send + Sync + 'static {
     fn cache_salt(&self, _params: &BTreeMap<String, ParamValue>, _base_dir: Option<&Path>) -> String {
         String::new()
     }
+
+    /// How far around each sample this node reads its inputs, for tiled
+    /// builds. `ctx` has the parameters and the whole build grid, but no
+    /// inputs. The default, [`Reach::Global`], is always correct but gives
+    /// the node a world pass; point-wise and neighbourhood nodes should say
+    /// [`Reach::Local`].
+    fn reach(&self, _ctx: &EvalContext) -> Reach {
+        Reach::Global
+    }
+
+    /// Global nodes in a tiled build: the whole-world grid the world pass
+    /// runs on, for a build over `ctx.spec`. Its inputs are brought to this
+    /// grid the way [`EvalContext::spec`] is filtered and resampled for
+    /// simulations. `None` if the node only needs each input's range
+    /// ([`WorldPass::ranges`]). Default: the build grid, capped at
+    /// [`WORLD_PASS_RESOLUTION`].
+    fn world_spec(&self, ctx: &EvalContext) -> Option<GridSpec> {
+        Some(default_world_spec(ctx.spec))
+    }
+
+    /// Global nodes in a tiled build: how far [`NodeKind::finish_tile`]
+    /// reads its tile inputs around each sample, in metres (e.g. a band
+    /// along a shoreline). Default: 0.
+    fn finish_reach(&self, _ctx: &EvalContext) -> f64 {
+        0.0
+    }
+
+    /// Global nodes in a tiled build: how an output of the world pass is
+    /// brought to a tile's grid by [`NodeKind::finish_tile`]'s default.
+    /// Default: a `height` output keeps the fine detail of the `in` input
+    /// ([`Upsample::Detail`]); everything else is bilinear.
+    fn upsample(&self, output: &PortDef) -> Upsample {
+        let schema = self.schema();
+        let detail = output.ty == PortType::Heightfield
+            && output.key == "height"
+            && schema.input("in").is_some_and(|i| i.ty == PortType::Heightfield);
+        if detail {
+            Upsample::Detail("in".into())
+        } else {
+            Upsample::Bilinear
+        }
+    }
+
+    /// Global nodes in a tiled build: this node's outputs over one tile
+    /// (`ctx.spec`, with the tile's inputs), from its world pass.
+    fn finish_tile(&self, ctx: &EvalContext, world: &WorldPass) -> Result<Outputs> {
+        let mut outputs = Outputs::new();
+        for port in &self.schema().outputs {
+            let Some(value) = world.outputs.get(&port.key) else {
+                continue;
+            };
+            let upsample = self.upsample(port);
+            outputs.insert(port.key.clone(), upsample_value(ctx, world, value, &upsample)?);
+        }
+        Ok(outputs)
+    }
+}
+
+/// How far a node reads around each sample (see [`NodeKind::reach`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Reach {
+    /// Each output sample depends only on input samples within this many
+    /// metres of it (0 = only the sample at the same position).
+    Local(f64),
+    /// Outputs depend on the whole world (water routing, auto ranges…).
+    Global,
+}
+
+/// How a world-pass output becomes a tile's output (see [`NodeKind::upsample`]).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Upsample {
+    Bilinear,
+    /// For categories and angles, which must not be blended.
+    Nearest,
+    /// The tile's own input on this port plus the change the node made to
+    /// it in the world pass: heights keep detail finer than the world pass.
+    Detail(String),
+}
+
+/// Largest world-pass grid per axis by default ([`NodeKind::world_spec`]).
+pub const WORLD_PASS_RESOLUTION: u32 = 4097;
+
+/// The whole build grid `full`, capped at [`WORLD_PASS_RESOLUTION`].
+pub fn default_world_spec(full: GridSpec) -> GridSpec {
+    let full = full.whole();
+    let cap = |n: u32| n.min(WORLD_PASS_RESOLUTION);
+    GridSpec::new(cap(full.width), cap(full.height), full.origin_m, full.extent_m)
+}
+
+/// A global node's whole-world result, for finishing its tiles.
+pub struct WorldPass {
+    /// The world-pass grid (`None` if the node only asked for ranges).
+    pub spec: Option<GridSpec>,
+    /// Inputs on the world-pass grid.
+    pub inputs: BTreeMap<String, Value>,
+    /// Outputs on the world-pass grid.
+    pub outputs: Outputs,
+    /// Exact lowest and highest value of each grid input over the whole
+    /// build, at build resolution.
+    pub ranges: BTreeMap<String, (f32, f32)>,
+}
+
+/// `value` (a world-pass output) brought to `ctx.spec` by `how`.
+pub fn upsample_value(ctx: &EvalContext, world: &WorldPass, value: &Value, how: &Upsample) -> Result<Value> {
+    let spec = ctx.spec;
+    Ok(match value {
+        Value::Points(p) => Value::Points(Arc::new(p.within(spec))),
+        Value::ColorMap(c) => Value::ColorMap(Arc::new(ColorGrid::from_fn_indexed(spec, |_, x, y| {
+            c.sample_bilinear_m(x, y)
+        }))),
+        _ => {
+            let ty = value.port_type();
+            let g = value.grid();
+            let grid = match how {
+                Upsample::Bilinear => Grid::from_fn(spec, |x, y| g.sample_bilinear_m(x, y)),
+                Upsample::Nearest => Grid::from_fn(spec, |x, y| g.sample_nearest_m(x, y)),
+                Upsample::Detail(port) => {
+                    let fine = ctx.input_grid(port)?;
+                    let coarse = world.inputs.get(port).ok_or_else(|| CoreError::MissingInput {
+                        node: ctx.node_id.into(),
+                        port: port.clone(),
+                    })?;
+                    let coarse = coarse.grid();
+                    Grid::from_fn_indexed(spec, |i, x, y| {
+                        fine.data[i] + (g.sample_bilinear_m(x, y) - coarse.sample_bilinear_m(x, y))
+                    })
+                }
+            };
+            match ty {
+                PortType::Mask => Value::Mask(Arc::new(grid)),
+                _ => Value::Heightfield(Arc::new(grid)),
+            }
+        }
+    })
 }
 
 /// A float parameter that may vary per cell (see [`ParamDef::drivable`]).

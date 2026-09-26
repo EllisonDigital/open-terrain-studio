@@ -27,6 +27,8 @@ thiserror = "2"
 libm = "0.2"
 exr = "1.73"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# Streamed PNG writing for builds too big to hold in memory (same crate image uses).
+png = "0.18"
 
 [profile.dev]
 # Terrain maths is far too slow unoptimised; keep debug info but optimise.

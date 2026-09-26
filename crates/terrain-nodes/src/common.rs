@@ -114,3 +114,20 @@ pub fn file_salt(
         Err(_) => format!("{}|missing", p.display()),
     }
 }
+
+/// Largest distance between neighbouring samples of `ctx.spec`, in metres.
+pub fn cell_m(ctx: &EvalContext) -> f64 {
+    let c = ctx.spec.cell_size_m();
+    c[0].max(c[1])
+}
+
+/// How far `terrain_core::ops::gaussian_blur` with `sigma_m` reads: 3.5 σ
+/// covers both the exact kernel and the box-blur approximation.
+pub fn blur_reach(sigma_m: f64) -> f64 {
+    3.5 * sigma_m.max(0.0)
+}
+
+/// Reach of a node whose outputs only use inputs at the same position.
+pub fn point_wise() -> terrain_core::Reach {
+    terrain_core::Reach::Local(0.0)
+}

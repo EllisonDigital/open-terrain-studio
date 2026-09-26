@@ -12,7 +12,7 @@ const Inspector := preload("res://scripts/inspector.gd")
 const BuildPanel := preload("res://scripts/build_panel.gd")
 
 const PREVIEW_RESOLUTIONS := [256, 512, 1024, 2048]
-const EXPORT_RESOLUTIONS := [512, 1009, 1024, 2017, 2048, 4033, 4096, 8129, 8192]
+const EXPORT_RESOLUTIONS := [512, 1009, 1024, 2017, 2048, 4033, 4096, 8129, 8192, 16129, 16384]
 const SETTINGS_PATH := "user://settings.cfg"
 const REPO_URL := "https://github.com/EllisonDigital/open-terrain-studio"
 ## Example projects bundled with the app, built only from built-in nodes.
@@ -30,7 +30,7 @@ const EXAMPLES := [
 const GRAPH_TABS := ["terrain", "vegetation", "colour"]
 
 enum Menu { NEW, OPEN, SAVE, SAVE_AS, EXPORT, QUIT, WORLD, DOCS, ABOUT, UNDO, REDO, MARK_EXPORT, BUILD,
-		AUTO_UPDATE, UPDATE_PREVIEW, FORCE_CPU, EXAMPLE = 100 }
+		AUTO_UPDATE, UPDATE_PREVIEW, FORCE_CPU, CACHE, EXAMPLE = 100 }
 
 var project: TerrainProject
 var graph: TerrainGraph
@@ -63,6 +63,9 @@ var settings := ConfigFile.new()
 var _status_label: Label
 var _stats_label: Label
 var _progress: ProgressBar
+## Progress of a build or export, apart from the preview's.
+var _build_progress: ProgressBar
+var _build_cancel: Button
 var _open_dialog: FileDialog
 var _save_dialog: FileDialog
 var _export_dialog: ConfirmationDialog
@@ -87,6 +90,11 @@ var _preview_stale := false
 var _gpu_label: Label
 var _gpu_state := ""
 var _data_view_toggle: CheckBox
+var _cache_dialog: ConfirmationDialog
+var _cache_memory: SpinBox
+var _cache_spill: CheckBox
+var _cache_disk: SpinBox
+var _cache_folder: LineEdit
 
 
 func _ready() -> void:
@@ -102,7 +110,7 @@ func _ready() -> void:
 	add_child(builder)
 
 	exporter = TerrainExporter.new()
-	exporter.progress.connect(func(f): _progress.value = f * 100.0)
+	exporter.progress.connect(_on_export_progress)
 	exporter.export_finished.connect(_on_export_finished)
 	add_child(exporter)
 
@@ -168,6 +176,9 @@ func _build_ui() -> void:
 	_settings_menu.add_check_item("Force CPU (debugging)", Menu.FORCE_CPU)
 	_settings_menu.set_item_tooltip(_settings_menu.get_item_index(Menu.FORCE_CPU),
 			"Compute every node on the CPU even when a GPU is available.")
+	_settings_menu.add_item("Cache…", Menu.CACHE)
+	_settings_menu.set_item_tooltip(_settings_menu.get_item_index(Menu.CACHE),
+			"How much memory and disk space computed results may use.")
 	_settings_menu.id_pressed.connect(_on_menu)
 	_settings_menu.about_to_popup.connect(_update_settings_menu)
 	menubar.add_child(_settings_menu)
@@ -250,6 +261,7 @@ func _build_ui() -> void:
 		_save_settings()
 		TerrainBuilder.set_builds_on_gpu(on))
 	build_panel.build_requested.connect(_start_build)
+	build_panel.cancel_requested.connect(_cancel_build)
 	build_panel.export_toggled.connect(_on_export_toggled)
 	build_panel.view_requested.connect(func(id):
 		graph_panel.select_node(id)
@@ -279,6 +291,17 @@ func _build_ui() -> void:
 	_progress.show_percentage = false
 	_progress.visible = false
 	sb.add_child(_progress)
+	_build_progress = ProgressBar.new()
+	_build_progress.custom_minimum_size = Vector2(140, 0)
+	_build_progress.tooltip_text = "Build progress"
+	_build_progress.visible = false
+	sb.add_child(_build_progress)
+	_build_cancel = Button.new()
+	_build_cancel.text = "Cancel build"
+	_build_cancel.flat = true
+	_build_cancel.visible = false
+	_build_cancel.pressed.connect(_cancel_build)
+	sb.add_child(_build_cancel)
 	root.add_child(status_bar)
 
 
@@ -485,6 +508,8 @@ func _build_dialogs() -> void:
 
 	_message = AcceptDialog.new()
 	add_child(_message)
+
+	_build_cache_dialog()
 
 
 # ---- project lifecycle ----------------------------------------------------
@@ -944,8 +969,7 @@ func _start_export() -> void:
 	project.set_build_resolution(res)
 	project.set_build_folder(folder)
 	if exporter.request_export(project, viewed_id, _viewed_port(), res, folder, formats):
-		_progress.visible = true
-		_progress.value = 0
+		_show_build_running(true)
 		_set_status("Exporting at %d²…" % res)
 
 
@@ -962,22 +986,43 @@ func _start_build(resolution: int, folder: String) -> void:
 	project.set_build_resolution(resolution)
 	project.set_build_folder(folder)
 	if exporter.request_build(project, resolution, folder):
-		build_panel.busy = true
-		_progress.visible = true
-		_progress.value = 0
+		_show_build_running(true)
 		_set_status("Building %d output%s at %d²…" % [project.get_exports().size(), "" if project.get_exports().size() == 1 else "s", resolution])
 
 
 func _on_export_finished(ok: bool, message: String, files: PackedStringArray) -> void:
-	_progress.visible = false
-	build_panel.busy = false
+	_show_build_running(false)
 	build_panel.refresh()
 	_update_title()
-	if ok:
+	if not ok and message.contains("cancelled"):
+		_set_status("Build cancelled. Nothing was written.")
+	elif ok:
 		_set_status("Exported %d files to %s" % [files.size(), files[0].get_base_dir()])
 		_show_message("Export complete", "Written:\n" + "\n".join(Array(files).map(func(f): return String(f).get_file())))
 	else:
 		_show_message("Export failed", message)
+
+
+## Builds and exports run in the background: show their own progress and a
+## Cancel button, so previews can carry on meanwhile.
+func _show_build_running(on: bool) -> void:
+	build_panel.busy = on
+	_build_progress.visible = on
+	_build_progress.value = 0
+	_build_cancel.visible = on
+	_build_cancel.disabled = false
+
+
+func _on_export_progress(fraction: float) -> void:
+	_build_progress.value = fraction * 100.0
+	build_panel.set_progress(fraction)
+
+
+func _cancel_build() -> void:
+	if exporter.is_busy():
+		exporter.cancel()
+		_build_cancel.disabled = true
+		_set_status("Cancelling the build…")
 
 
 # ---- menus ----------------------------------------------------------------
@@ -1057,6 +1102,8 @@ func _on_menu(id: int) -> void:
 			graph_panel.rebuild()
 			_request_preview()
 			_set_status("Computing on the CPU only." if on else "Computing on the GPU where nodes support it.")
+		Menu.CACHE:
+			_open_cache_dialog()
 		Menu.DOCS:
 			OS.shell_open(REPO_URL)
 		Menu.ABOUT:
@@ -1092,6 +1139,7 @@ func _load_settings() -> void:
 	auto_update = settings.get_value("preview", "auto_update", true)
 	TerrainBuilder.set_force_cpu(settings.get_value("compute", "force_cpu", false))
 	TerrainBuilder.set_builds_on_gpu(settings.get_value("compute", "builds_on_gpu", false))
+	_apply_cache_settings()
 
 
 func _save_settings() -> void:
@@ -1103,6 +1151,92 @@ func _update_settings_menu() -> void:
 	_settings_menu.set_item_checked(_settings_menu.get_item_index(Menu.FORCE_CPU),
 			settings.get_value("compute", "force_cpu", false))
 	_settings_menu.set_item_disabled(_settings_menu.get_item_index(Menu.FORCE_CPU), _gpu_state != "ready")
+
+
+# ---- result cache -----------------------------------------------------------
+
+## Cache limits from the settings: memory, and results kept on disk.
+func _apply_cache_settings() -> void:
+	var memory: int = settings.get_value("cache", "memory_mb", 1024)
+	var spill: bool = settings.get_value("cache", "spill", true)
+	var disk: int = settings.get_value("cache", "disk_mb", 8192)
+	var folder: String = settings.get_value("cache", "folder", "")
+	if folder == "":
+		folder = TerrainBuilder.get_default_cache_folder()
+	var error := TerrainBuilder.set_cache_limits(memory, disk if spill else 0, folder)
+	if error != "":
+		push_warning("Cache folder: " + error)
+		TerrainBuilder.set_cache_limits(memory, 0, "")
+
+
+func _build_cache_dialog() -> void:
+	_cache_dialog = ConfirmationDialog.new()
+	_cache_dialog.title = "Cache"
+	_cache_dialog.ok_button_text = "Apply"
+	var v := VBoxContainer.new()
+	v.custom_minimum_size = Vector2(440, 0)
+	var about := Label.new()
+	about.text = "Computed node results are kept so unchanged nodes aren't computed again. Results that don't fit in memory can be kept on disk instead of dropped, which helps large builds and big graphs."
+	about.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(about)
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_child(_dialog_label("Memory"))
+	_cache_memory = SpinBox.new()
+	_cache_memory.min_value = 0.25
+	_cache_memory.max_value = 256
+	_cache_memory.step = 0.25
+	_cache_memory.suffix = "GB"
+	grid.add_child(_cache_memory)
+	_cache_spill = CheckBox.new()
+	_cache_spill.text = "Keep results on disk, up to"
+	grid.add_child(_cache_spill)
+	_cache_disk = SpinBox.new()
+	_cache_disk.min_value = 1
+	_cache_disk.max_value = 4096
+	_cache_disk.suffix = "GB"
+	_cache_spill.toggled.connect(func(on):
+		_cache_disk.editable = on
+		_cache_folder.editable = on)
+	grid.add_child(_cache_disk)
+	grid.add_child(_dialog_label("Folder"))
+	_cache_folder = LineEdit.new()
+	_cache_folder.custom_minimum_size = Vector2(300, 0)
+	_cache_folder.placeholder_text = TerrainBuilder.get_default_cache_folder()
+	_cache_folder.tooltip_text = "Leave empty for the system's temporary folder. Files are deleted when the app closes."
+	grid.add_child(_cache_folder)
+	v.add_child(grid)
+	_cache_dialog.add_child(v)
+	_cache_dialog.confirmed.connect(func():
+		settings.set_value("cache", "memory_mb", int(_cache_memory.value * 1024))
+		settings.set_value("cache", "spill", _cache_spill.button_pressed)
+		settings.set_value("cache", "disk_mb", int(_cache_disk.value * 1024))
+		settings.set_value("cache", "folder", _cache_folder.text.strip_edges())
+		_save_settings()
+		_apply_cache_settings()
+		_set_status("Cache settings applied."))
+	add_child(_cache_dialog)
+
+
+func _dialog_label(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	return l
+
+
+func _open_cache_dialog() -> void:
+	_cache_memory.value = settings.get_value("cache", "memory_mb", 1024) / 1024.0
+	_cache_spill.button_pressed = settings.get_value("cache", "spill", true)
+	_cache_disk.value = settings.get_value("cache", "disk_mb", 8192) / 1024.0
+	_cache_disk.editable = _cache_spill.button_pressed
+	_cache_folder.text = settings.get_value("cache", "folder", "")
+	_cache_folder.editable = _cache_spill.button_pressed
+	_cache_dialog.popup_centered()
+
+
+func _exit_tree() -> void:
+	# Delete results kept on disk.
+	TerrainBuilder.set_cache_limits(settings.get_value("cache", "memory_mb", 1024), 0, "")
 
 
 ## The GPU starts in the background: check until it is ready (or known missing).

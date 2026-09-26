@@ -183,6 +183,7 @@ fn thermal_talus_angle_is_the_same_on_diagonals() {
         height: 61,
         origin_m: [0.0, 0.0],
         extent_m: [60.0, 60.0],
+        window: None,
     };
     let c = 30i64;
     let pile = Grid::from_fn_indexed(spec, |i, _, _| {
@@ -266,6 +267,7 @@ fn rectangular_grid_and_invalid_inputs() {
         height: 9,
         origin_m: [-50.0, 12.0],
         extent_m: [100.0, 70.0],
+        window: None,
     };
     let g = Grid::from_fn(spec, |x, y| (x + y) as f32);
     for node in [&Hydraulic::default() as &dyn NodeKind, &Thermal::default()] {

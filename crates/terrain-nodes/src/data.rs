@@ -103,6 +103,9 @@ impl NodeKind for HeightMask {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
         let (lo, hi, f) = (ctx.f32("low_m"), ctx.f32("high_m"), ctx.f32("falloff_m"));
@@ -140,6 +143,9 @@ impl Default for Slope {
 impl NodeKind for Slope {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        terrain_core::Reach::Local(crate::common::cell_m(ctx))
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
@@ -202,6 +208,11 @@ impl Default for Curvature {
 impl NodeKind for Curvature {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        terrain_core::Reach::Local(
+            crate::common::blur_reach(ctx.f64("radius_m") * 0.5) + crate::common::cell_m(ctx),
+        )
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
@@ -271,6 +282,9 @@ impl Default for Aspect {
 impl NodeKind for Aspect {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        terrain_core::Reach::Local(crate::common::cell_m(ctx))
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
@@ -342,6 +356,9 @@ impl NodeKind for SelectRange {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
         let (lo, hi, f) = (ctx.f32("low"), ctx.f32("high"), ctx.f32("falloff"));
@@ -391,6 +408,9 @@ impl Default for Distance {
 impl NodeKind for Distance {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        terrain_core::Reach::Local(ctx.f64("distance_m") + 2.0 * crate::common::cell_m(ctx))
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;

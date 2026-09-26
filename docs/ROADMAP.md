@@ -256,6 +256,29 @@ limits are in [vegetation.md](vegetation.md).
 
 **Goal:** handle real production sizes and larger, more organised graphs.
 
+**Status (26 Sep 2026):** in progress on the `v0.8-production-scale` branch. Details are in
+[production-scale.md](production-scale.md).
+
+- *Done and tested:*
+  - Tiled builds: builds over 4,097 are computed in tiles of 1,024–4,096 samples, up to 65,537 per side.
+    Tiles aren't blended: each node reads a declared distance, and every tile is computed with a margin
+    wide enough to be exact, so tiled and untiled results are bit-identical for every local node type
+    (tested). Erosion, water and auto ranges run once on a whole-world grid and finish each tile at full
+    resolution; they stay within 0.2% of untiled results (tested).
+  - Builds are put back together on disk and written a band of rows at a time, or as tile files that
+    share their edges, named `{name}_x{x}_y{y}` for Unreal World Partition.
+  - The cache spills to disk, with memory and disk limits under *Settings → Cache…*.
+  - Background builds: builds run on their own threads with their own progress bar and a Cancel button,
+    and the graph stays editable (previews keep working during a build; tested).
+- *Exit criterion, 8,192² on 16 GB:* met on the development laptop (Ryzen 9 8940HX, 16 GB). The *River
+  coast* example plus three chained populations (trees, shrubs, grass), 16 marked outputs, built at
+  8,193² in 7 min 10 s with a peak of 5.0 GB (`cargo run --release -p terrain-nodes --example bench_build`).
+- *Exit criterion, 16,384² tiled:* not yet measured. The tiles' shared edges are identical by
+  construction (tested), but nothing has been imported into Unreal yet.
+- *Already there:* portals (v0.6) and the search-to-add node menu.
+- *Not started:* mesh export, groups and frames, node bypass, templates, exposed parameters and variation
+  builds.
+
 **Deliverables**
 
 - Tiled builds: world split into overlapping tiles, each evaluated and blended; builds up to 16,384² and beyond on 16 GB RAM machines.

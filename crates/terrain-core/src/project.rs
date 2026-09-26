@@ -32,6 +32,34 @@ pub struct ExportSpec {
 pub struct BuildSettings {
     pub resolution: u32,
     pub folder: String,
+    /// Builds above [`crate::tiled::TILED_ABOVE`] are computed in tiles of
+    /// this many samples per side: smaller uses less memory.
+    #[serde(default = "default_tile_size")]
+    pub tile_size: u32,
+    /// Write each image as a grid of tile files instead of one file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_tiles: Option<FileTiles>,
+}
+
+fn default_tile_size() -> u32 {
+    crate::tiled::DEFAULT_TILE_SIZE
+}
+
+/// Images written as tiles, e.g. for Unreal World Partition. Neighbouring
+/// tiles share their edge row or column of samples, like landscape
+/// components, so a build of `n × (size - 1) + 1` samples splits evenly.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FileTiles {
+    /// Samples per tile side, shared edge included (e.g. 1009, 2017, 4033).
+    pub size: u32,
+    /// File name pattern: `{name}` is the usual file name, `{x}` and `{y}`
+    /// the tile's column and row, counted from 0.
+    #[serde(default = "default_tile_pattern")]
+    pub pattern: String,
+}
+
+pub fn default_tile_pattern() -> String {
+    "{name}_x{x}_y{y}".into()
 }
 
 impl Default for BuildSettings {
@@ -39,6 +67,8 @@ impl Default for BuildSettings {
         Self {
             resolution: 2048,
             folder: "output/".into(),
+            tile_size: default_tile_size(),
+            file_tiles: None,
         }
     }
 }

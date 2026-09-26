@@ -6,6 +6,7 @@
 //!
 //! See `docs/ARCHITECTURE.md` for the design this crate implements.
 
+pub mod assemble;
 pub mod cache;
 pub mod error;
 pub mod eval;
@@ -22,6 +23,7 @@ pub mod points;
 pub mod preset;
 pub mod project;
 pub mod seed;
+pub mod tiled;
 pub mod world;
 
 pub use cache::{CacheStats, EvalCache};
@@ -31,7 +33,10 @@ pub use gpu::{Gpu, GpuBuffer, GpuDevice, GpuField, GpuGrid, GpuStats, Kernel, Pa
 pub use graph::{Graph, Link, NodeId, NodeInstance, Tab};
 pub use grid::{ColorGrid, Grid, GridSpec};
 pub use history::{EditState, History};
-pub use node::{EvalContext, Field, NodeKind, NodeRegistry, NodeSchema, Outputs, PortDef, PortType, Value};
+pub use node::{
+    EvalContext, Field, NodeKind, NodeRegistry, NodeSchema, Outputs, PortDef, PortType, Reach, Upsample,
+    Value, WorldPass,
+};
 pub use params::{Curve, Gradient, ParamDef, ParamKind, ParamValue};
 pub use points::{Point, PointSet};
 pub use project::Project;

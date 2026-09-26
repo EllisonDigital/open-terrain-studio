@@ -99,6 +99,9 @@ impl NodeKind for Mountain {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let (cx, cy) = position(ctx);
         let radius = ctx.f64("radius_m");
@@ -206,6 +209,9 @@ impl NodeKind for Ridge {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let (cx, cy) = position(ctx);
         let (dx, dy) = direction(ctx.f64("angle_deg"));
@@ -301,6 +307,9 @@ impl NodeKind for Canyon {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let (cx, cy) = position(ctx);
         let (dx, dy) = direction(ctx.f64("angle_deg"));
@@ -388,6 +397,9 @@ impl NodeKind for Crater {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let (cx, cy) = position(ctx);
         let radius = ctx.f64("radius_m");
@@ -466,6 +478,9 @@ impl NodeKind for Plateau {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let (cx, cy) = position(ctx);
         let radius = ctx.f64("radius_m");
@@ -541,6 +556,9 @@ impl Default for Dunes {
 impl NodeKind for Dunes {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let (dx, dy) = direction(ctx.f64("angle_deg"));

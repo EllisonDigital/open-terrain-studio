@@ -137,6 +137,8 @@ Each grid carries its resolution, its world extent and a cell size in metres (`w
 
 **Tiling:** the data model is tile-aware from v0.1 (a grid knows its offset in the world) even though builds are single-tile until v0.8. Tiled builds split the world into overlapping tiles, process each, and blend the overlaps. This keeps 16K+ builds within memory.
 
+> **Changed 26 Sep 2026 (v0.8):** tiles are not blended. A tile is an exact window of the build grid, and each node declares how far it reads (`NodeKind::reach`); every node is computed over its tile plus a margin big enough that the tile's own samples are exact, so tiled and untiled results are bit-identical for local nodes. Nodes that need the whole world (erosion, water routing, auto ranges) get a *world pass* on their own whole-world grid, streamed from the tiles, and finish each tile at full resolution from it. Builds over 4,097 are tiled. See [production-scale.md](production-scale.md).
+
 **Memory budget:** one 8,192² `f32` map is 256 MB. The cache must be size-limited (LRU) and able to spill to disk.
 
 ---
@@ -180,6 +182,8 @@ pub trait NodeKind: Send + Sync {
 **Caching.** Cache key = hash(node type, parameters, seed, resolution, tile, input keys). A change to one node invalidates only that node and its descendants. Preview and build resolutions are cached separately.
 
 > **Added 25 Sep 2026 (v0.2):** the key also includes the node's type version and the world settings. Nodes that read outside the graph add to it (the File node adds the imported file's size and modification time). The cache is an in-memory LRU, 1 GiB by default, shared by preview, export and build jobs. Spilling to disk (section 4, *Memory budget*) is not built yet.
+
+> **Added 26 Sep 2026 (v0.8):** results pushed out of memory can be spilled to a folder, up to a disk budget, and are read back instead of recomputed (*Settings → Cache…*).
 
 **Determinism.** Each node gets a seed derived from the project seed and the node's stable id. No node may use wall-clock time, thread order or unordered hash-map iteration in its results. Parallel reductions must be order-independent.
 

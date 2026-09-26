@@ -111,6 +111,9 @@ impl NodeKind for CurveNode {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
         let curve = ctx.curve("curve");
@@ -149,6 +152,9 @@ impl Default for Clamp {
 impl NodeKind for Clamp {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
@@ -195,12 +201,34 @@ impl NodeKind for Invert {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        if ctx.choice("around") == "input" {
+            terrain_core::Reach::Global
+        } else {
+            crate::common::point_wise()
+        }
+    }
+    fn world_spec(&self, _ctx: &EvalContext) -> Option<terrain_core::GridSpec> {
+        None
+    }
+    fn finish_tile(&self, ctx: &EvalContext, world: &terrain_core::WorldPass) -> Result<Outputs> {
+        let range = world.ranges.get("in").copied();
+        self.invert(ctx, range)
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
+        self.invert(ctx, None)
+    }
+}
+
+impl Invert {
+    /// Invert over `ctx`; `range` is the input range for "Mirror the input"
+    /// (the input's own when `None`).
+    fn invert(&self, ctx: &EvalContext, range: Option<(f32, f32)>) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
         // h' = sum - h: mirror around sum / 2.
         let sum = match ctx.choice("around").as_str() {
             "input" => {
-                let (lo, hi) = input.min_max();
+                let (lo, hi) = range.unwrap_or_else(|| input.min_max());
                 lo + hi
             }
             "pivot" => 2.0 * ctx.f32("pivot_m"),
@@ -241,6 +269,9 @@ impl Default for Terrace {
 impl NodeKind for Terrace {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, _ctx: &EvalContext) -> terrain_core::Reach {
+        crate::common::point_wise()
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
@@ -285,6 +316,9 @@ impl NodeKind for Blur {
     fn schema(&self) -> &NodeSchema {
         &self.schema
     }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        terrain_core::Reach::Local(crate::common::blur_reach(ctx.f64("radius_m") * 0.5))
+    }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
         let blurred = gaussian_blur(input, ctx.f64("radius_m") * 0.5);
@@ -323,6 +357,9 @@ impl Default for Sharpen {
 impl NodeKind for Sharpen {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        terrain_core::Reach::Local(crate::common::blur_reach(ctx.f64("radius_m") * 0.5))
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
@@ -370,6 +407,27 @@ impl Default for Transform {
 impl NodeKind for Transform {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        // The inverse transform is affine, so the farthest any output sample
+        // reads from is at a corner of the world.
+        let c = ctx.world.centre();
+        let (mx, my) = (ctx.f64("move_x_m"), ctx.f64("move_y_m"));
+        let (cos, sin) = direction(-ctx.f64("rotation_deg"));
+        let scale = ctx.f64("scale");
+        let s = ctx.spec.whole();
+        let mut reach: f64 = 0.0;
+        for (x, y) in [
+            (s.origin_m[0], s.origin_m[1]),
+            (s.origin_m[0] + s.extent_m[0], s.origin_m[1]),
+            (s.origin_m[0], s.origin_m[1] + s.extent_m[1]),
+            (s.origin_m[0] + s.extent_m[0], s.origin_m[1] + s.extent_m[1]),
+        ] {
+            let (px, py) = ((x - c[0] - mx) / scale, (y - c[1] - my) / scale);
+            let (sx, sy) = (px * cos - py * sin + c[0], px * sin + py * cos + c[1]);
+            reach = reach.max((sx - x).hypot(sy - y));
+        }
+        terrain_core::Reach::Local(reach + crate::common::cell_m(ctx))
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;
@@ -437,6 +495,12 @@ impl Default for Warp {
 impl NodeKind for Warp {
     fn schema(&self) -> &NodeSchema {
         &self.schema
+    }
+    fn reach(&self, ctx: &EvalContext) -> terrain_core::Reach {
+        // fBm is normalised to -1..1 on each axis; a driven strength only
+        // lowers it.
+        let s = ctx.f64("strength_m").abs();
+        terrain_core::Reach::Local(std::f64::consts::SQRT_2 * s + crate::common::cell_m(ctx))
     }
     fn evaluate(&self, ctx: &EvalContext) -> Result<Outputs> {
         let input = ctx.input_grid("in")?;

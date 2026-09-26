@@ -262,11 +262,12 @@ pub(crate) fn simulation_spec(spec: GridSpec, detail_m: f64) -> GridSpec {
     }
     let samples =
         |extent: f64| ((extent / detail_m).round() as u32 + 1).clamp(2, terrain_core::grid::MAX_RESOLUTION);
-    let canonical = GridSpec {
-        width: samples(spec.extent_m[0]),
-        height: samples(spec.extent_m[1]),
-        ..spec
-    };
+    let canonical = GridSpec::new(
+        samples(spec.extent_m[0]),
+        samples(spec.extent_m[1]),
+        spec.origin_m,
+        spec.extent_m,
+    );
     if canonical.width == spec.width && canonical.height == spec.height {
         spec
     } else {

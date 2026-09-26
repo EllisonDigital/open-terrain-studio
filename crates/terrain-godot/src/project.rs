@@ -403,9 +403,52 @@ impl TerrainProject {
     #[func]
     fn set_build_resolution(&mut self, resolution: i32) {
         let mut s = lock(&self.shared);
-        let r = resolution.clamp(2, terrain_core::grid::MAX_RESOLUTION as i32) as u32;
+        let r = resolution.clamp(2, terrain_core::grid::MAX_BUILD_RESOLUTION as i32) as u32;
         if s.project.build.resolution != r {
             s.project.build.resolution = r;
+            s.history.touch();
+        }
+    }
+
+    /// Samples per side of the tiles builds over 4,097 are computed in.
+    #[func]
+    fn get_build_tile_size(&self) -> i32 {
+        lock(&self.shared).project.build.tile_size as i32
+    }
+
+    #[func]
+    fn set_build_tile_size(&mut self, size: i32) {
+        let mut s = lock(&self.shared);
+        let size = size.clamp(64, terrain_core::grid::MAX_RESOLUTION as i32) as u32;
+        if s.project.build.tile_size != size {
+            s.project.build.tile_size = size;
+            s.history.touch();
+        }
+    }
+
+    /// Tile files: `enabled`, `size` (samples, shared edge included) and
+    /// `pattern`.
+    #[func]
+    fn get_build_file_tiles(&self) -> VarDictionary {
+        let s = lock(&self.shared);
+        let t = s.project.build.file_tiles.clone();
+        let mut d = VarDictionary::new();
+        put(&mut d, "enabled", t.is_some());
+        put(&mut d, "size", t.as_ref().map_or(2017, |t| t.size) as i64);
+        let pattern = t.map_or_else(terrain_core::project::default_tile_pattern, |t| t.pattern);
+        put(&mut d, "pattern", GString::from(pattern.as_str()));
+        d
+    }
+
+    #[func]
+    fn set_build_file_tiles(&mut self, enabled: bool, size: i32, pattern: GString) {
+        let mut s = lock(&self.shared);
+        let tiles = enabled.then(|| terrain_core::project::FileTiles {
+            size: size.clamp(2, terrain_core::grid::MAX_RESOLUTION as i32) as u32,
+            pattern: pattern.to_string(),
+        });
+        if s.project.build.file_tiles != tiles {
+            s.project.build.file_tiles = tiles;
             s.history.touch();
         }
     }

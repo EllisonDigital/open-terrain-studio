@@ -354,6 +354,63 @@ func run() -> void:
 	check(info is Dictionary and info["files"].size() == marked, "build.json lists %d marked files" % marked)
 	main._message.hide()
 
+	# Tile files: 513 = 2 × (257 - 1) + 1, so 2 × 2 even tiles per image.
+	main.build_panel._file_tiles.button_pressed = true
+	main.project.set_build_file_tiles(true, 257, "{name}_x{x}_y{y}")
+	main.build_panel.refresh()
+	check(main.build_panel._file_tiles.button_pressed and main.build_panel._tiles_note.visible, "tile files shown")
+	var tiles_out := OS.get_user_data_dir().path_join("ui_build_tiles")
+	main._start_build(513, tiles_out)
+	for i in 900:
+		await process_frame
+		if not main.exporter.is_busy():
+			break
+	info = JSON.parse_string(FileAccess.get_file_as_string(tiles_out.path_join("build.json")))
+	var images := 0
+	for e in main.project.get_exports():
+		if e.get("type", "") != "point_set":
+			images += e["formats"].size()
+	check(info is Dictionary and info.has("file_tiles") and info["file_tiles"]["even"], "build.json describes even tiles")
+	check(info is Dictionary and info["files"].size() == marked + 3 * images, "every image written as 4 tiles")
+	check(FileAccess.file_exists(tiles_out.path_join(info["files"][0]["file"])), "tile file on disk")
+	main.project.set_build_file_tiles(false, 257, "{name}_x{x}_y{y}")
+	main._message.hide()
+
+	# Background build: previews keep working while a large build runs, and
+	# the build can be cancelled without writing anything.
+	var big_out := OS.get_user_data_dir().path_join("ui_build_cancel")
+	main._start_build(4609, big_out)
+	check(main.exporter.is_busy() and main._build_progress.visible, "large build running")
+	await frames(10)
+	main.preview_resolution = 256
+	main._request_preview()
+	check(await wait_preview(main), "preview while building")
+	check(main.exporter.is_busy(), "build still running after the preview")
+	main._cancel_build()
+	for i in 1200:
+		await process_frame
+		if not main.exporter.is_busy():
+			break
+	check(not main.exporter.is_busy(), "build stopped")
+	check(main._status_label.text.contains("cancelled"), "cancel reported: " + main._status_label.text)
+	check(not FileAccess.file_exists(big_out.path_join("build.json")), "cancelled build wrote nothing")
+	check(not main._build_progress.visible, "build progress hidden")
+	main.preview_resolution = 512
+
+	# Cache settings apply without errors, and results spill to disk.
+	main._open_cache_dialog()
+	await frames(2)
+	await shot("16_cache_settings")
+	main._cache_memory.value = 0.25
+	main._cache_spill.button_pressed = true
+	main._cache_dialog.confirmed.emit()
+	main._cache_dialog.hide()
+	check(main.settings.get_value("cache", "memory_mb", 0) == 256, "cache memory saved")
+	var stats: Dictionary = TerrainBuilder.get_cache_stats()
+	check(stats.has("disk_megabytes"), "cache reports disk use")
+	main.settings.set_value("cache", "memory_mb", 1024)
+	main._apply_cache_settings()
+
 	print("FAILED: %d" % failures if failures else "ALL PASSED")
 	quit(1 if failures else 0)
 
