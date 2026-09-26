@@ -14,12 +14,16 @@ use terrain_core::{GridSpec, NodeKind};
 /// 2. Discharge Q (m³/yr): rain × cell area, accumulated from the ridges down,
 ///    losing a share to evaporation per kilometre travelled.
 /// 3. Erosion E = K·Q^0.5·S, solved implicitly in downstream order
-///    (Braun & Willett 2013), so any time step is stable.
+///    (Braun & Willett 2013), so any time step is stable. Erosion doesn't
+///    depend on the sediment already carried (detachment-limited, Howard
+///    1994); compare the sediment-flux models of Whipple & Tucker (2002) and
+///    Davy & Lague (2009), where a full river stops cutting its bed.
 /// 4. Sediment is carried downstream; where it exceeds the flow's capacity
 ///    (proportional to its stream power) the excess settles, filling lakes and
 ///    flats first.
-/// 5. Hillslope creep: linear diffusion, applied exactly as a Gaussian blur
-///    with σ = √(2·D·dt) metres, so it is the same at any resolution.
+/// 5. Hillslope creep: linear diffusion (Culling 1960), applied exactly as a
+///    Gaussian blur with σ = √(2·D·dt) metres (the heat kernel), so it is the
+///    same at any resolution.
 ///
 /// Every stage is sequential in a fixed order, or parallel over independent
 /// cells, so results are identical for any number of threads.

@@ -63,6 +63,10 @@ fn tolerance(type_id: &str) -> (f64, f64) {
         "vegetation.debris" => (0.01, 0.08),
         // Distances are exact to about one low-res cell (16 m of a 500 m fade).
         "data.distance" => (0.01, 0.05),
+        // The first output compared is Debris: thin deposits spread to all
+        // eight neighbours in a run shorter than one low-res cell of travel
+        // (p99 0.012 at 513² vs 2049²; heights agree to 0.00002 of range).
+        "simulate.thermal" => (0.002, 0.02),
         _ => (0.002, 0.01),
     }
 }

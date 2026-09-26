@@ -1,13 +1,15 @@
 // Thermal erosion (crates/terrain-nodes/src/erosion/thermal.rs): one time step
 // per dispatch, plus the Debris mask. The CPU computes every face flux, then
 // sums them; a flux depends only on the two cells it joins, so here each cell
-// computes its own four in- and outflows directly. Same arithmetic, one pass.
+// computes its own eight in- and outflows directly. Same arithmetic, one pass.
 //
 // Bindings: 0 height, 1 next height (or Debris), 2 strength mask, 3 hardness,
 //           4 terrain before erosion
 // u[4] pass: 0 one time step, 1 debris mask
 // u[5] strength mask connected   u[6] hardness connected
 // f[0], f[1] cell size x, y   f[2] talus slope (tan)   f[3] diffusivity   f[4] dt
+// f[5] diagonal distance   f[6], f[7] edge and diagonal face weights
+// (computed on the CPU, so both use the same values)
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 0, binding = 0, std430) readonly buffer Height { float height[]; };
 layout(set = 0, binding = 1, std430) writeonly buffer Next { float next[]; };
@@ -23,22 +25,26 @@ float softness(uint i) {
     return 1.0 - (pc.u[6] != 0u ? clamp(hardness[i], 0.0, 1.0) : 0.0);
 }
 
-// West, east, north, south; a missing neighbour is the cell itself.
+// West, east, north, south, north-west, north-east, south-west, south-east
+// (the CPU's order); a missing neighbour is the cell itself.
+const ivec2 OFFSETS[8] = ivec2[8](
+    ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1),
+    ivec2(-1, -1), ivec2(1, -1), ivec2(-1, 1), ivec2(1, 1)
+);
+
 uint neighbour(uvec2 g, uint k) {
-    if (k == 0u) {
-        return g.x > 0u ? cell(g.x - 1u, g.y) : cell(g.x, g.y);
-    } else if (k == 1u) {
-        return g.x + 1u < WIDTH ? cell(g.x + 1u, g.y) : cell(g.x, g.y);
-    } else if (k == 2u) {
-        return g.y > 0u ? cell(g.x, g.y - 1u) : cell(g.x, g.y);
+    ivec2 p = ivec2(g) + OFFSETS[k];
+    if (p.x < 0 || p.y < 0 || p.x >= int(WIDTH) || p.y >= int(HEIGHT)) {
+        return cell(g.x, g.y);
     }
-    return g.y + 1u < HEIGHT ? cell(g.x, g.y + 1u) : cell(g.x, g.y);
+    return cell(uint(p.x), uint(p.y));
 }
 
-// Material moving from cell `from` to its neighbour `to`, `d` metres apart.
-float flux(uint from, uint to, float d) {
+// Material moving from cell `from` to its neighbour `to`, `d` metres apart,
+// across a face of weight `w`.
+float flux(uint from, uint to, float d, float w) {
     float excess = max(height[from] - height[to] - pc.f[2] * d, 0.0);
-    return excess * pc.f[3] * pc.f[4] / (d * d) * min(strength(from), strength(to)) * softness(from);
+    return excess * pc.f[3] * pc.f[4] * w / (d * d) * min(strength(from), strength(to)) * softness(from);
 }
 
 void main() {
@@ -49,11 +55,12 @@ void main() {
     uint i = cell(g.x, g.y);
     if (pc.u[4] == 0u) {
         float delta = 0.0;
-        for (uint k = 0u; k < 4u; k++) {
+        for (uint k = 0u; k < 8u; k++) {
             uint j = neighbour(g, k);
-            float d = k < 2u ? pc.f[0] : pc.f[1];
-            float incoming = j == i ? 0.0 : flux(j, i, d);
-            delta += incoming - flux(i, j, d);
+            float d = k < 2u ? pc.f[0] : (k < 4u ? pc.f[1] : pc.f[5]);
+            float w = k < 4u ? pc.f[6] : pc.f[7];
+            float incoming = j == i ? 0.0 : flux(j, i, d, w);
+            delta += incoming - flux(i, j, d, w);
         }
         next[i] = height[i] + delta;
     } else {

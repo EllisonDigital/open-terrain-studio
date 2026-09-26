@@ -3,7 +3,11 @@
 //!
 //! A population turns the terrain (and optional water, snow, allowed-area and
 //! Occupied masks) into a density mask using Gaea's three factors: growth /
-//! health, inhibitors and dead zones. Points are then sampled from the density
+//! health, inhibitors and dead zones. Multiplying per-factor suitabilities
+//! (slope, altitude, moisture, relative height) is the habitat model of
+//! Hammes 2001, "Modeling of ecosystems as a data source for real-time
+//! terrain rendering" (see also Deussen et al. 1998, "Realistic modeling and
+//! rendering of plant ecosystems", SIGGRAPH). Points are then sampled from the density
 //! with a minimum spacing in metres. Candidate points sit on a grid of cells
 //! fixed in the world, and every random choice is seeded from a cell's world
 //! coordinates, so points don't move when the resolution changes.
@@ -112,9 +116,11 @@ pub struct Scatter<'a> {
 }
 
 /// Poisson-disk style points from a density mask: at most one point per
-/// world-fixed cell of `spacing / √2`, kept with probability equal to the
+/// world-fixed cell of `spacing / √2` (the background grid of Bridson 2007,
+/// "Fast Poisson disk sampling in arbitrary dimensions"), kept with probability equal to the
 /// density there and moved (up to three tries) to stay `spacing` metres
-/// from every other point. Cells are handled in nine interleaved phases so
+/// from every other point. Cells are handled in nine interleaved phases (the
+/// phase groups of Wei 2008, "Parallel Poisson disk sampling") so
 /// cells handled together are too far apart to conflict: the result is the
 /// same for any number of threads. Heights come from `height`.
 pub fn scatter(density: &Grid, height: &Grid, s: &Scatter, cancel: &dyn Fn() -> bool) -> Result<PointSet> {

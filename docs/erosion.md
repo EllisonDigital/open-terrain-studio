@@ -28,6 +28,8 @@ Hydraulic controls:
 
 Thermal controls: `duration_s` (60 s), `talus_angle_deg` (35°), and `diffusivity_m2_s` (10 m²/s). Steeper slopes shed material into neighbouring cells. Transport is proportional to slope excess and diffusivity; increasing resolution reduces the stable timestep rather than changing the physical duration.
 
+> **Changed 26 Sep 2026:** material now moves to all **eight** neighbours, each compared with the talus slope over its own distance (after Musgrave, Kolb & Mace 1989). With only the four edge neighbours, the talus angle held along the grid axes but a 35° pile stood at about 44° along the diagonals (atan(√2 × tan 35°)), giving square scree cones; a sand-pile test now checks both directions settle within 3° of each other. Faces use the isotropic nine-point weights (2/3 on edges, 1/3 on diagonals), so *Transport rate* means the same as before and the stable step is unchanged. The *Solver* notes below describe the four-neighbour stencil and are kept as a record.
+
 Rock hardness alternates horizontal beds using terrain elevation. `layer_thickness_m` (50 m) is each bed's thickness; a complete soft/hard repeat is twice that. `offset_m` shifts the beds vertically. `soft_hardness` (0.1) and `hard_hardness` (0.9) set their strengths with smooth transitions. Hardness is sampled from the supplied map throughout a simulation: it does **not** discover new geological layers as the ground erodes. Chain another hardness/erosion pair for that workflow.
 
 ## Hydraulic erosion model (since 25 Sep 2026)
@@ -38,9 +40,9 @@ The new model is a landscape-evolution model over geological time, built clean-r
 
 1. **Routing.** Priority-Flood+ε (Barnes, Lehman & Mulla 2014) fills pits *for routing only* and gives a downstream-first order. The ε gradient is jittered per cell, so flow across flats and filled lakes wanders instead of running in straight grid lines. Each cell drains to its steepest downhill neighbour (8 directions). **Cells on the world's edge are outlets** (the first solver had closed edges).
 2. **Discharge** Q (m³/yr) = rain × cell area, accumulated from the ridges down, keeping `(1 - evaporation/1000)` per metre of flow.
-3. **River erosion**, the stream-power law E = K·Q^0.5·S with K = 10⁻⁵ × rock softness × downcutting × strength × (1 − hardness). It's solved implicitly in downstream order (Braun & Willett 2013), so any step length is stable. Cells in pits (lakes) are not incised.
+3. **River erosion**, the stream-power law E = K·Q^0.5·S with K = 10⁻⁵ × rock softness × downcutting × strength × (1 − hardness). It's solved implicitly in downstream order (Braun & Willett 2013), so any step length is stable. Cells in pits (lakes) are not incised. Erosion doesn't slow as the river fills with sediment (a detachment-limited model); the sediment-flux models of Whipple & Tucker (2002) and Davy & Lague (2009) would, at the cost of more aggradation with the current defaults.
 4. **Sediment** is carried downstream. Where the load exceeds capacity (`sediment_capacity` × 10⁻⁵ × Q^0.5 × S × cell area × dt), a share `1 - (1 - deposition)^(distance/100 m)` of the excess settles. It fills lakes up to their spill level first; elsewhere at most half the drop to the next cell.
-5. **Hillslope creep**: linear diffusion D (m²/yr), applied exactly as a Gaussian blur with σ = √(2·D·dt). It rounds hillslopes and removes rills narrower than the valleys. It's weighted by strength × (1 − hardness).
+5. **Hillslope creep**: linear diffusion D (m²/yr; Culling 1960), applied exactly as a Gaussian blur with σ = √(2·D·dt), the heat kernel. It rounds hillslopes and removes rills narrower than the valleys. It's weighted by strength × (1 − hardness).
 
 **Resolution independence.** Rivers in this kind of model are one cell wide, so the simulation runs on a fixed grid of *Detail size* cells (default 8 m) whatever the output resolution. The terrain is low-pass filtered by half a detail cell, resampled onto that grid and simulated. Then only the *change* is resampled onto the output grid and added to the full-resolution input, so detail smaller than the simulation cells survives. Every output finer than twice the detail size gets exactly the same simulation. Much coarser previews simulate on their own grid for speed and are approximate. Cells with zero strength in the full-resolution mask are left exactly unchanged.
 
@@ -99,7 +101,7 @@ The existing exporter writes masks directly as linear 0–1 float EXR or 16-bit 
 
 ## Solver and determinism
 
-The clean-room starting point is the water/sediment and talus models in [Musgrave, *Methods for Realistic Landscape Imaging*, §2.4](https://www.kenmusgrave.com/dissertation.pdf). This implementation adds physical spacing/time, bounded transport, explicit simultaneous updates, mask controls and deterministic parallel execution. It is a terrain-authoring approximation, not a calibrated hydrological solver or a full shallow-water momentum simulation.
+For the literature behind every algorithm, see [references.md](references.md). The clean-room starting point is the water/sediment and talus models in [Musgrave, *Methods for Realistic Landscape Imaging*, §2.4](https://www.kenmusgrave.com/dissertation.pdf). This implementation adds physical spacing/time, bounded transport, explicit simultaneous updates, mask controls and deterministic parallel execution. It is a terrain-authoring approximation, not a calibrated hydrological solver or a full shallow-water momentum simulation.
 
 > **Replaced 25 Sep 2026:** these hydraulic steps, time steps, boundary conditions and the validation figures below describe the first solver and are kept as a record. The thermal parts still apply.
 

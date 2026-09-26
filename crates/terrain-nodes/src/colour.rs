@@ -469,7 +469,11 @@ impl NodeKind for NormalMap {
 
 // ---- Occlusion ----------------------------------------------------------------
 
-/// Ambient occlusion / cavity: dark in hollows, creases and valley floors.
+/// Cavity (an ambient-occlusion approximation): dark in hollows, creases and
+/// valley floors. It measures how far each point lies below the mean height
+/// around it at three scales, not the visible sky; for true sky visibility see
+/// the sky-view factor (Zakšek, Oštir & Kokalj 2011) or horizon-based ambient
+/// occlusion (Bavoil, Sainz & Dimitrov 2008).
 pub struct Occlusion {
     schema: NodeSchema,
 }
@@ -481,8 +485,9 @@ impl Default for Occlusion {
                 "data.occlusion",
                 "Occlusion",
                 "Data",
-                "How open the sky is above each point: white on ridges and open ground, dark in hollows, \
-                 creases and valley floors. Radius sets the size of the features that shade; small radii \
+                "An approximation of how open the sky is: white on ridges and open ground, dark in \
+                 hollows, creases and valley floors, by how far each point lies below its surroundings \
+                 (not a traced sky view). Radius sets the size of the features that shade; small radii \
                  give a cavity map.",
                 vec![PortDef::new("in", "Terrain", PortType::Heightfield)],
                 vec![PortDef::new("out", "Occlusion", PortType::Mask)],

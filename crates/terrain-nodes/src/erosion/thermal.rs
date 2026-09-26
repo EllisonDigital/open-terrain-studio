@@ -6,7 +6,22 @@ use terrain_core::{Gpu, NodeKind, Params};
 /// enough for the OS to reset the driver, long enough to keep the GPU busy.
 const STEPS_PER_SUBMIT: usize = 64;
 
-/// Conservative, slope-limited diffusion of material above the talus angle.
+/// Face weights for edge and diagonal neighbours (see [`Thermal`]).
+const EDGE_WEIGHT: f32 = 2.0 / 3.0;
+const DIAGONAL_WEIGHT: f32 = 1.0 / 3.0;
+
+/// Conservative, slope-limited diffusion of material above the talus angle
+/// (after Musgrave, Kolb & Mace 1989, "The synthesis and rendering of eroded
+/// fractal terrains", SIGGRAPH). Material moves to all eight neighbours, each
+/// compared with the talus slope over its own distance, so the angle holds on
+/// diagonals too: with only the four edge neighbours a 35° talus stands at
+/// about 45° along the diagonals (atan(√2 · tan 35°)).
+///
+/// Each face moves `weight · diffusivity · dt / d²` of its excess, with the
+/// weights of the isotropic nine-point Laplacian (2/3 on edges, 1/3 on
+/// diagonals; e.g. Patra & Karttunen 2006), so in the linear regime the
+/// stencil diffuses at `diffusivity` in every direction, as the four-point
+/// one did along the axes.
 pub struct Thermal {
     schema: NodeSchema,
 }
@@ -34,6 +49,10 @@ impl Default for Thermal {
 fn setup(ctx: &EvalContext, dx: f32, dy: f32) -> Result<(f32, f32, usize, f32)> {
     let diffusivity = ctx.f32("diffusivity_m2_s");
     let spacing = dx.min(dy);
+    // With k = diffusivity · dt / spacing², an edge face moves 2k/3 of its
+    // excess and a diagonal k/6. A peak above eight equal neighbours closes
+    // 4k of its excess per step (8k/3 + 2k/3 lost, 2k/3 gained): at most
+    // 0.8 with k ≤ 0.2, so it never overshoots.
     let max_dt = if diffusivity > 0.0 {
         (0.2 * spacing * spacing / diffusivity).min(1.0)
     } else {
@@ -52,7 +71,7 @@ impl NodeKind for Thermal {
         let (talus, diffusivity, steps, dt) = setup(ctx, d.distance[0], d.distance[2])?;
         let mut height = d.terrain.data.clone();
         let mut next = height.clone();
-        let mut flux = vec![[0.0f32; 4]; d.len];
+        let mut flux = vec![[0.0f32; 8]; d.len];
         ctx.report_progress(0.0);
         for step in 0..steps {
             check_cancel(ctx)?;
@@ -60,7 +79,8 @@ impl NodeKind for Thermal {
                 for (k, j) in neighbours(i, d.width, d.len).into_iter().enumerate() {
                     let excess = (height[i] - height[j] - talus * d.distance[k]).max(0.0);
                     // Face strength preserves a zero-mask cell exactly, including deposition.
-                    out[k] = excess * diffusivity * dt / (d.distance[k] * d.distance[k])
+                    let weight = if k < 4 { EDGE_WEIGHT } else { DIAGONAL_WEIGHT };
+                    out[k] = excess * diffusivity * dt * weight / (d.distance[k] * d.distance[k])
                         * d.strength(i).min(d.strength(j))
                         * d.softness(i);
                 }
@@ -111,7 +131,10 @@ impl NodeKind for Thermal {
             .f(1, dy)
             .f(2, talus)
             .f(3, diffusivity)
-            .f(4, dt);
+            .f(4, dt)
+            .f(5, (dx * dx + dy * dy).sqrt())
+            .f(6, EDGE_WEIGHT)
+            .f(7, DIAGONAL_WEIGHT);
         let (mask, hardness) = (
             mask.as_ref().unwrap_or(&dummy),
             hardness.as_ref().unwrap_or(&dummy),
