@@ -10,7 +10,7 @@ use support::{registry, smooth_source, temp_dir};
 use terrain_core::export::build_marked;
 use terrain_core::preset::SpeciesPreset;
 use terrain_core::{
-    EvalOptions, Grid, GridSpec, NodeRegistry, ParamValue, PointSet, Project, Value, evaluate_node,
+    EvalOptions, Grid, GridSpec, NodeRegistry, ParamValue, PointSet, Project, Tab, Value, evaluate_node,
 };
 
 fn set(p: &mut Project, reg: &NodeRegistry, id: &str, params: &[(&str, ParamValue)]) {
@@ -383,6 +383,72 @@ fn spacing_too_small_for_the_world_is_an_error() {
     let spec = GridSpec::full_world(&p.world, 65).unwrap();
     let err = evaluate_node(&p.graph, &reg, &p.world, spec, &id, &EvalOptions::default()).unwrap_err();
     assert!(err.to_string().contains("Raise the spacing"), "{err}");
+}
+
+/// v0.7 projects kept vegetation in the Terrain tab. On load, it moves to the
+/// Vegetation tab and terrain reaches it through portals: no link is left
+/// crossing tabs (the editor hides those), and every result is unchanged.
+#[test]
+fn v0_7_projects_open_with_vegetation_in_its_own_tab() {
+    let reg = registry();
+    let (old, [pine, birch, shrubs]) = chained(&reg);
+    assert!(old.graph.nodes().all(|n| n.tab == Tab::Terrain));
+    let (p, warnings) = Project::from_json(&old.to_json().unwrap(), &reg).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    for id in [&pine, &birch, &shrubs] {
+        assert_eq!(p.graph.node(id).unwrap().tab, Tab::Vegetation);
+    }
+    // Terrain and Wetness stay put; their outputs arrive through portals.
+    let portals: Vec<_> = p
+        .graph
+        .nodes()
+        .filter(|n| n.type_id.starts_with("portal."))
+        .collect();
+    assert_eq!(
+        portals.len(),
+        2,
+        "one portal per terrain output used (height, wetness)"
+    );
+    assert!(portals.iter().all(|n| n.tab == Tab::Vegetation));
+    for link in p.graph.links() {
+        let (from, to) = (
+            p.graph.node(&link.from.0).unwrap(),
+            p.graph.node(&link.to.0).unwrap(),
+        );
+        assert!(
+            from.tab == to.tab || to.type_id.starts_with("portal."),
+            "{link:?} crosses tabs"
+        );
+    }
+    // Chaining between populations stays direct, inside the tab.
+    assert_eq!(p.graph.link_into(&birch, "occupied").unwrap().from.0, pine);
+    for id in [&pine, &birch, &shrubs] {
+        let (a, b) = (outputs(&old, &reg, id, 129), outputs(&p, &reg, id, 129));
+        assert_eq!(points(&a), points(&b), "{id} points changed");
+        assert_eq!(mask(&a, "density"), mask(&b, "density"), "{id} density changed");
+    }
+    // Loading again moves nothing more.
+    let (again, _) = Project::from_json(&p.to_json().unwrap(), &reg).unwrap();
+    assert_eq!(again.graph.nodes().count(), p.graph.nodes().count());
+}
+
+#[test]
+fn bundled_examples_keep_vegetation_in_its_tab() {
+    let reg = registry();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/examples");
+    for name in ["forest_valley.otstudio", "asterfall_crown.otstudio"] {
+        let json = std::fs::read_to_string(dir.join(name)).unwrap();
+        let raw: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let (mut p, _) = Project::from_json(&json, &reg).unwrap();
+        // The file itself is already in the v0.7.5 layout: nothing was added on load.
+        assert_eq!(
+            p.graph.nodes().count(),
+            raw["nodes"].as_array().unwrap().len(),
+            "{name}"
+        );
+        assert_eq!(p.graph.move_vegetation_to_tab(&reg), 0, "{name}");
+        assert!(p.graph.nodes().any(|n| n.tab == Tab::Vegetation), "{name}");
+    }
 }
 
 /// Exit criterion: over a million points in under ten seconds. Grass on the

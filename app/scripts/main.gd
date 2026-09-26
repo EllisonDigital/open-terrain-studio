@@ -26,6 +26,9 @@ const EXAMPLES := [
 	["Forest valley — vegetation", "res://examples/forest_valley.otstudio"],
 ]
 
+## Graph editor tabs, in the order shown.
+const GRAPH_TABS := ["terrain", "vegetation", "colour"]
+
 enum Menu { NEW, OPEN, SAVE, SAVE_AS, EXPORT, QUIT, WORLD, DOCS, ABOUT, UNDO, REDO, MARK_EXPORT, BUILD,
 		AUTO_UPDATE, UPDATE_PREVIEW, FORCE_CPU, EXAMPLE = 100 }
 
@@ -215,9 +218,11 @@ func _build_ui() -> void:
 	graph_box.add_theme_constant_override("separation", 0)
 	graph_tabs = TabBar.new()
 	graph_tabs.add_tab("Terrain")
+	graph_tabs.add_tab("Vegetation")
 	graph_tabs.add_tab("Colour")
 	graph_tabs.set_tab_tooltip(0, "Shape the landscape: height, erosion, water, masks.")
-	graph_tabs.set_tab_tooltip(1, "Colour the landscape: colour maps, splat maps and normal maps, from Terrain outputs sent here through portals.")
+	graph_tabs.set_tab_tooltip(1, "Grow plants and scatter rocks: Trees, Shrubs, Grass and Debris, from Terrain outputs sent here through portals.")
+	graph_tabs.set_tab_tooltip(2, "Colour the landscape: colour maps, splat maps and normal maps, from Terrain and Vegetation outputs sent here through portals.")
 	graph_tabs.tab_changed.connect(_set_graph_tab)
 	graph_box.add_child(graph_tabs)
 	graph_box.add_child(graph_panel)
@@ -232,7 +237,7 @@ func _build_ui() -> void:
 	inspector.param_changed.connect(_on_param_changed)
 	inspector.port_toggled.connect(_on_port_toggled)
 	inspector.export_toggled.connect(_on_export_toggled)
-	inspector.send_to_colour.connect(_send_to_colour)
+	inspector.send_to_tab.connect(_send_to_tab)
 	inspector.species_preset_chosen.connect(_apply_species_preset)
 	inspector.world_changed.connect(_on_world_changed)
 	side_tabs.add_child(inspector)
@@ -556,7 +561,7 @@ func _after_project_loaded(viewed: String) -> void:
 	# Open on the tab of the viewed node.
 	graph_panel.tab = _tab_of(viewed)
 	graph_tabs.set_block_signals(true)
-	graph_tabs.current_tab = 1 if graph_panel.tab == "colour" else 0
+	graph_tabs.current_tab = maxi(GRAPH_TABS.find(graph_panel.tab), 0)
 	graph_tabs.set_block_signals(false)
 	graph_panel.set_graph(graph)
 	_apply_world()
@@ -737,7 +742,7 @@ func _on_port_toggled(node_id: String, key: String, exposed: bool) -> void:
 		_set_status("Connect a mask to the new port on the node to drive this value.")
 
 
-## Editor tab ("terrain" or "colour") of a node; "terrain" if unknown.
+## Editor tab ("terrain", "vegetation" or "colour") of a node; "terrain" if unknown.
 func _tab_of(id: String) -> String:
 	for n in graph.get_nodes():
 		if n["id"] == id:
@@ -746,30 +751,32 @@ func _tab_of(id: String) -> String:
 
 
 func _set_graph_tab(index: int) -> void:
-	graph_panel.set_tab("colour" if index == 1 else "terrain")
+	graph_panel.set_tab(GRAPH_TABS[index])
 	if viewed_id != "" and _tab_of(viewed_id) == graph_panel.tab:
 		graph_panel.select_node(viewed_id)
 
 
-## Bring a Terrain output into the Colour tab through a new portal, and show it.
-func _send_to_colour(node_id: String, port: String) -> void:
-	# Stack portals down the left of the Colour tab's nodes.
+## Bring an output into another tab ("vegetation" or "colour") through a new
+## portal, and show it.
+func _send_to_tab(node_id: String, port: String, tab: String) -> void:
+	# Stack portals down the left of that tab's nodes.
 	var left := 0.0
 	var count := 0
 	for n in graph.get_nodes():
-		if n.get("tab", "terrain") == "colour":
+		if n.get("tab", "terrain") == tab:
 			left = minf(left, n["pos"].x) if count > 0 else n["pos"].x
 			count += 1
 	var pos := Vector2(left - 320.0 if count > 0 else 0.0, 140.0 * count)
-	var portal := graph.send_to_colour_tab(node_id, port, pos)
+	var portal := graph.send_to_tab(node_id, port, pos, tab)
+	var tab_name := tab.capitalize()
 	if portal == "":
-		_set_status("Could not send to the Colour tab: " + graph.get_last_error())
+		_set_status("Could not send to the %s tab: %s" % [tab_name, graph.get_last_error()])
 		return
 	_on_graph_edited()
-	graph_tabs.current_tab = 1
+	graph_tabs.current_tab = GRAPH_TABS.find(tab)
 	graph_panel.select_node(portal)
 	_view_node(portal)
-	_set_status("Sent %s %s to the Colour tab." % [node_id, port])
+	_set_status("Sent %s %s to the %s tab." % [node_id, port, tab_name])
 
 
 func _on_export_toggled(node_id: String, port: String, format: String, on: bool) -> void:

@@ -31,6 +31,16 @@ func run() -> void:
 	var birch := "n_0007"
 	var shrubs := "n_0008"
 	var rocks := "n_0009"
+	# v0.7.5: populations live in the Vegetation tab, terrain arrives by portal.
+	var tabs := {}
+	for n in graph.get_nodes():
+		tabs[n["id"]] = n["tab"]
+	check([pine, birch, shrubs, rocks].all(func(id): return tabs[id] == "vegetation") and tabs["n_0003"] == "terrain",
+			"populations in the Vegetation tab, terrain in Terrain")
+	var sent := graph.send_to_tab("n_0003", "height", Vector2(0, -900), "vegetation")
+	check(sent != "" and project.undo() != "", "heights can be sent to the Vegetation tab (undone)")
+	check(graph.send_to_tab(pine, "points", Vector2.ZERO, "colour") == "", "points can't go through a portal")
+	check(graph.send_to_tab("n_0003", "height", Vector2.ZERO, "nowhere") == "", "unknown tab refused")
 	var builder := TerrainBuilder.new()
 	root.add_child(builder)
 	builder.preview_failed.connect(func(_generation, error):
@@ -41,7 +51,7 @@ func run() -> void:
 	builder.request_preview(project, shrubs, "density", 257)
 	var preview: TerrainPreview = await builder.preview_ready
 	check(preview.get_port_type() == "mask", "shrub density is a mask")
-	check(preview.get_base_node_id() == "n_0003", "draped over the eroded terrain")
+	check(preview.get_base_node_id() == "n_000b", "draped over the eroded terrain (via its portal)")
 	var layers: Array = preview.get_vegetation(0)
 	var nodes := layers.map(func(l): return l["node"])
 	check(nodes.has(pine) and nodes.has(birch) and nodes.has(shrubs), "pine, birch and shrubs drawn: %s" % [nodes])

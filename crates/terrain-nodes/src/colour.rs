@@ -645,11 +645,11 @@ impl Portal {
                 label,
                 "Portal",
                 &format!(
-                    "Brings {what} from the Terrain tab into the Colour tab, so colour work never \
-                     recomputes the terrain. Create one with \"Send to Colour tab\" on a Terrain \
+                    "Brings {what} from another tab (e.g. Terrain into Vegetation or Colour), so work \
+                     in this tab never recomputes the other. Create one with \"Send to … tab\" on a \
                      node's output."
                 ),
-                vec![PortDef::new("in", "From Terrain", ty)],
+                vec![PortDef::new("in", "Source", ty)],
                 vec![PortDef::new("out", "Out", ty)],
                 vec![],
             ),

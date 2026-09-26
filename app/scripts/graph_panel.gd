@@ -96,7 +96,7 @@ func set_graph(g: TerrainGraph) -> void:
 	frame_all.call_deferred()
 
 
-## Show another editor tab ("terrain" or "colour").
+## Show another editor tab ("terrain", "vegetation" or "colour").
 func set_tab(t: String) -> void:
 	tab = t
 	if graph == null:
@@ -140,7 +140,8 @@ func rebuild() -> void:
 	var links: Array = graph.get_links()
 	for node in nodes:
 		if node.get("tab", "terrain") == tab:
-			_add_graph_node(node, selected.has(node["id"]), _portal_source(node, nodes, links))
+			_add_graph_node(node, selected.has(node["id"]), _portal_source(node, nodes, links),
+					_portal_origin(node, nodes, links))
 	for link in links:
 		var from_idx: int = _ports.get(link["from"], {}).get("outputs", []).find(link["from_port"])
 		var to_idx: int = _ports.get(link["to"], {}).get("inputs", []).find(link["to_port"])
@@ -176,7 +177,19 @@ func add_node_at(type_id: String, graph_pos: Vector2) -> String:
 	return id
 
 
-## For a portal: "<node> · <output>" it brings from the Terrain tab, or "".
+## For a portal: the tab its source is in ("Terrain"…), or "".
+func _portal_origin(node: Dictionary, nodes: Array, links: Array) -> String:
+	if not String(node["type"]).begins_with("portal."):
+		return ""
+	for link in links:
+		if link["to"] == node["id"] and link["to_port"] == "in":
+			for n in nodes:
+				if n["id"] == link["from"]:
+					return String(n.get("tab", "terrain")).capitalize()
+	return ""
+
+
+## For a portal: "<node> · <output>" it brings from another tab, or "".
 func _portal_source(node: Dictionary, nodes: Array, links: Array) -> String:
 	if not String(node["type"]).begins_with("portal."):
 		return ""
@@ -192,7 +205,7 @@ func _portal_source(node: Dictionary, nodes: Array, links: Array) -> String:
 	return "(source deleted)"
 
 
-func _add_graph_node(node: Dictionary, selected: bool, portal_source := "") -> void:
+func _add_graph_node(node: Dictionary, selected: bool, portal_source := "", portal_origin := "") -> void:
 	var gn := GraphNode.new()
 	gn.name = node["id"]
 	gn.title = node["label"] if portal_source == "" else "⇠ " + portal_source
@@ -231,7 +244,7 @@ func _add_graph_node(node: Dictionary, selected: bool, portal_source := "") -> v
 		gn.add_child(row)
 		var has_in := i < inputs.size() and portal_source == ""
 		if portal_source != "":
-			left.text = "from Terrain"
+			left.text = "from " + portal_origin if portal_origin != "" else "from another tab"
 			left.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
 		var has_out := i < outputs.size()
 		var in_type: String = inputs[i]["type"] if has_in else "heightfield"
@@ -296,11 +309,19 @@ func _build_add_menu() -> void:
 	_search_types.clear()
 	var by_category := {}
 	for t in graph.get_node_types():
-		# Portals are made with "Send to Colour tab"; colour work lives in the Colour tab.
-		if t["category"] == "Portal" or (tab == "terrain" and t["category"] == "Colour"):
+		# Portals are made with "Send to … tab". Colour work lives in the Colour
+		# tab, plants in the Vegetation tab (which gets terrain through portals).
+		var hidden: Array = {
+			"terrain": ["Colour", "Vegetation"],
+			"vegetation": ["Colour", "Terrain", "Simulate"],
+			"colour": ["Vegetation"],
+		}.get(tab, [])
+		if t["category"] == "Portal" or hidden.has(t["category"]):
 			continue
 		by_category.get_or_add(t["category"], []).append(t)
 	var order := ["Primitives", "Noise", "Terrain", "Adjust", "Combine", "Data", "Simulate", "Colour", "Output"]
+	if tab == "vegetation":
+		order.push_front("Vegetation")
 	var categories: Array = by_category.keys()
 	categories.sort_custom(func(a, b):
 		var ia := order.find(a)

@@ -86,10 +86,10 @@ func run() -> void:
 			check(loaded != null and loaded.get_width() == 65, "exported %s loads" % f.get_file())
 
 	# The Colour tab: portals bring Terrain outputs over; tabs are saved.
-	var portal := graph.send_to_colour_tab(terrain, "out", Vector2(-300, 0))
+	var portal := graph.send_to_tab(terrain, "out", Vector2(-300, 0), "colour")
 	check(portal != "", "height sent to the Colour tab")
-	var mask_portal := graph.send_to_colour_tab(slope, "out", Vector2(-300, 150))
-	check(graph.send_to_colour_tab(blend, "out", Vector2.ZERO) == "", "colour maps can't be sent")
+	var mask_portal := graph.send_to_tab(slope, "out", Vector2(-300, 150), "colour")
+	check(graph.send_to_tab(blend, "out", Vector2.ZERO, "colour") == "", "colour maps can't be sent")
 	var tabs := {}
 	var types := {}
 	for n in graph.get_nodes():

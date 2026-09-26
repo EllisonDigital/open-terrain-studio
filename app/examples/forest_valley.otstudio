@@ -12,7 +12,7 @@
     ],
     "seed": 7007
   },
-  "next_node_id": 11,
+  "next_node_id": 15,
   "nodes": [
     {
       "id": "n_0001",
@@ -82,6 +82,7 @@
       "id": "n_0006",
       "type": "vegetation.trees",
       "type_version": 1,
+      "tab": "vegetation",
       "pos": [
         1300,
         -320
@@ -110,6 +111,7 @@
       "id": "n_0007",
       "type": "vegetation.trees",
       "type_version": 1,
+      "tab": "vegetation",
       "pos": [
         1300,
         60
@@ -136,6 +138,7 @@
       "id": "n_0008",
       "type": "vegetation.shrubs",
       "type_version": 1,
+      "tab": "vegetation",
       "pos": [
         1660,
         -120
@@ -161,6 +164,7 @@
       "id": "n_0009",
       "type": "vegetation.debris",
       "type_version": 1,
+      "tab": "vegetation",
       "pos": [
         1660,
         360
@@ -180,11 +184,56 @@
       "id": "n_000a",
       "type": "output.pack_masks",
       "type_version": 1,
+      "tab": "vegetation",
       "pos": [
         2020,
         60
       ],
       "params": {}
+    },
+    {
+      "id": "n_000b",
+      "type": "portal.height",
+      "type_version": 1,
+      "pos": [
+        960,
+        -620
+      ],
+      "params": {},
+      "tab": "vegetation"
+    },
+    {
+      "id": "n_000c",
+      "type": "portal.mask",
+      "type_version": 1,
+      "pos": [
+        960,
+        -480
+      ],
+      "params": {},
+      "tab": "vegetation"
+    },
+    {
+      "id": "n_000d",
+      "type": "portal.mask",
+      "type_version": 1,
+      "pos": [
+        960,
+        -340
+      ],
+      "params": {},
+      "tab": "vegetation"
+    },
+    {
+      "id": "n_000e",
+      "type": "portal.mask",
+      "type_version": 1,
+      "pos": [
+        960,
+        360
+      ],
+      "params": {},
+      "tab": "vegetation"
     }
   ],
   "links": [
@@ -230,8 +279,8 @@
     },
     {
       "from": [
-        "n_0003",
-        "height"
+        "n_000b",
+        "out"
       ],
       "to": [
         "n_0006",
@@ -240,8 +289,8 @@
     },
     {
       "from": [
-        "n_0003",
-        "height"
+        "n_000b",
+        "out"
       ],
       "to": [
         "n_0007",
@@ -250,8 +299,8 @@
     },
     {
       "from": [
-        "n_0003",
-        "height"
+        "n_000b",
+        "out"
       ],
       "to": [
         "n_0008",
@@ -260,8 +309,8 @@
     },
     {
       "from": [
-        "n_0003",
-        "height"
+        "n_000b",
+        "out"
       ],
       "to": [
         "n_0009",
@@ -270,8 +319,8 @@
     },
     {
       "from": [
-        "n_0004",
-        "wetness"
+        "n_000c",
+        "out"
       ],
       "to": [
         "n_0006",
@@ -280,8 +329,8 @@
     },
     {
       "from": [
-        "n_0004",
-        "wetness"
+        "n_000c",
+        "out"
       ],
       "to": [
         "n_0007",
@@ -290,8 +339,8 @@
     },
     {
       "from": [
-        "n_0004",
-        "wetness"
+        "n_000c",
+        "out"
       ],
       "to": [
         "n_0008",
@@ -300,8 +349,8 @@
     },
     {
       "from": [
-        "n_0005",
-        "snow"
+        "n_000d",
+        "out"
       ],
       "to": [
         "n_0006",
@@ -310,8 +359,8 @@
     },
     {
       "from": [
-        "n_0005",
-        "snow"
+        "n_000d",
+        "out"
       ],
       "to": [
         "n_0008",
@@ -340,8 +389,8 @@
     },
     {
       "from": [
-        "n_0003",
-        "debris"
+        "n_000e",
+        "out"
       ],
       "to": [
         "n_0009",
@@ -396,6 +445,46 @@
       "to": [
         "n_000a",
         "a"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "height"
+      ],
+      "to": [
+        "n_000b",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0004",
+        "wetness"
+      ],
+      "to": [
+        "n_000c",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0005",
+        "snow"
+      ],
+      "to": [
+        "n_000d",
+        "in"
+      ]
+    },
+    {
+      "from": [
+        "n_0003",
+        "debris"
+      ],
+      "to": [
+        "n_000e",
+        "in"
       ]
     }
   ],

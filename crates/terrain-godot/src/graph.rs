@@ -1,6 +1,6 @@
 use godot::prelude::*;
 use terrain_core::preset::SpeciesPreset;
-use terrain_core::{NodeSchema, PortType, Tab};
+use terrain_core::{NodeSchema, Tab};
 
 use crate::convert::{json_to_variant, param_to_variant, put, variant_to_param};
 use crate::project::{Shared, lock};
@@ -195,7 +195,7 @@ impl TerrainGraph {
         }
     }
 
-    /// Add a node to an editor tab ("terrain" or "colour"). Returns its id, or
+    /// Add a node to an editor tab ("terrain", "vegetation" or "colour"). Returns its id, or
     /// "" on error.
     #[func]
     fn add_node_in_tab(&mut self, type_id: GString, pos: Vector2, tab: GString) -> GString {
@@ -222,39 +222,21 @@ impl TerrainGraph {
         }
     }
 
-    /// Bring a Terrain-tab output into the Colour tab: adds a Height or Mask
-    /// Portal there at `pos`, linked to `from`'s output `from_port`. Returns
-    /// the portal's id, or "" on error (e.g. for a colour map).
+    /// Bring an output into another editor tab ("vegetation" or "colour"):
+    /// adds a Height or Mask Portal there at `pos`, linked to `from`'s output
+    /// `from_port`. Returns the portal's id, or "" on error (e.g. for a colour
+    /// map or points, which portals don't carry).
     #[func]
-    fn send_to_colour_tab(&mut self, from: GString, from_port: GString, pos: Vector2) -> GString {
-        let (from, from_port) = (from.to_string(), from_port.to_string());
-        let ty = lock(&self.shared)
-            .project
-            .graph
-            .node(&from)
-            .and_then(|n| registry().schema(&n.type_id))
-            .and_then(|s| s.output(&from_port))
-            .map(|o| o.ty);
-        let portal = match ty {
-            Some(PortType::Heightfield) => "portal.height",
-            Some(PortType::Mask) => "portal.mask",
-            Some(PortType::ColorMap | PortType::PointSet) => {
-                self.fail(
-                    "only heights and masks can be sent to the Colour tab (colour maps are made there; points aren't colours)"
-                        .into(),
-                );
-                return GString::new();
-            }
-            None => {
-                self.fail(format!("node {from} has no output '{from_port}'"));
-                return GString::new();
-            }
+    fn send_to_tab(&mut self, from: GString, from_port: GString, pos: Vector2, tab: GString) -> GString {
+        let Some(tab) = Tab::parse(&tab.to_string()) else {
+            self.fail(format!("unknown tab '{tab}'"));
+            return GString::new();
         };
-        let result = lock(&self.shared).edit("Send to Colour tab", None, |p| {
-            let id = p.graph.add_node(registry(), portal, [pos.x, pos.y])?;
-            p.graph.set_tab(&id, Tab::Colour)?;
-            p.graph.connect(registry(), &from, &from_port, &id, "in")?;
-            Ok(id)
+        let (from, from_port) = (from.to_string(), from_port.to_string());
+        let label = format!("Send to {} tab", tab.label());
+        let result = lock(&self.shared).edit(&label, None, |p| {
+            p.graph
+                .add_portal(registry(), &from, &from_port, tab, [pos.x, pos.y])
         });
         match result {
             Ok(id) => id.as_str().into(),
