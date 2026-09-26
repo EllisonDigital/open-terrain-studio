@@ -80,12 +80,18 @@ func run() -> void:
 	view.set_show_plants(false)
 	check(view.get_plant_instance_count() == 0, "Plants toggle hides them")
 	view.set_show_plants(true)
+	check(not view.is_overlay_shown(), "v0.7.6: a vegetation node shows its plants, not its weight map")
+	view.set_show_weight_map(true)
+	check(view.is_overlay_shown(), "Weight map toggle paints the density under the plants")
+	view.set_show_weight_map(false)
 
 	# Points output: shown as a mask of points, with the count.
 	builder.request_preview(project, pine, "points", 257)
 	var pts: TerrainPreview = await builder.preview_ready
 	check(pts.get_port_type() == "point_set" and pts.get_point_count() > 100, "pine points: %d" % pts.get_point_count())
 	check(pts.get_max() == 1.0 and pts.get_image().get_width() == 257, "points drawn as a mask")
+	view.show_preview(pts)
+	check(not view.is_overlay_shown(), "points output: plants only until Weight map is on")
 
 	# Ecosystem data view.
 	builder.set_data_view(true)
