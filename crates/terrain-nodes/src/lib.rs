@@ -22,6 +22,7 @@ pub mod kernels;
 pub mod noise;
 pub mod primitives;
 pub mod terrain;
+pub mod vegetation;
 pub mod water;
 
 use terrain_core::NodeRegistry;
@@ -87,9 +88,15 @@ pub fn registry() -> NodeRegistry {
     r.register(colour::Blend::default());
     r.register(colour::Layers::default());
     r.register(colour::Image::default());
+    // Vegetation
+    r.register(vegetation::Population::trees());
+    r.register(vegetation::Population::shrubs());
+    r.register(vegetation::Population::grass());
+    r.register(vegetation::Debris::default());
     // Output
     r.register(colour::NormalMap::default());
     r.register(colour::Splat::default());
+    r.register(vegetation::PackMasks::default());
     // Portals (Terrain tab to Colour tab)
     r.register(colour::Portal::new(terrain_core::PortType::Heightfield));
     r.register(colour::Portal::new(terrain_core::PortType::Mask));

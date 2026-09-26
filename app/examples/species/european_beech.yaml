@@ -1,0 +1,23 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: European beech
+node: vegetation.trees
+biome: temperate
+description: Shade-casting broadleaf of moist, well-drained lowland and hill slopes, with a closed canopy.
+species: european_beech
+coverage: 0.95
+health: 0.8
+water_preference: 0.25
+spread_m: 35
+patches: 0.2
+patch_size_m: 300
+randomness: 0.15
+slope_max_deg: 32
+height_max_m: 1000
+height_falloff_m: 150
+avoid_peaks: 0.3
+snow_tolerance: 0.2
+dead_zones: 0.3
+spacing_m: 9
+scale_min: 0.85
+scale_max: 1.3

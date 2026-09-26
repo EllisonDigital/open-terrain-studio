@@ -1,0 +1,23 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Kapok (rainforest emergent)
+node: vegetation.trees
+biome: tropical
+description: Giant emergent of lowland rainforest, towering over the canopy on moist ground.
+species: kapok
+coverage: 0.4
+health: 0.85
+water_preference: 0.5
+spread_m: 40
+patches: 0.3
+patch_size_m: 400
+randomness: 0.4
+slope_max_deg: 35
+height_max_m: 900
+height_falloff_m: 150
+avoid_peaks: 0.2
+snow_tolerance: 0
+dead_zones: 0.3
+spacing_m: 25
+scale_min: 0.9
+scale_max: 1.6

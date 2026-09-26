@@ -9,7 +9,8 @@
 //!
 //! The node's first output is drawn unless another output (e.g. `flow`) is named.
 //!
-//! Heightfields are hillshaded with a height tint; masks are drawn in grey.
+//! Heightfields are hillshaded with a height tint; masks are drawn in grey;
+//! points as white dots.
 
 use std::path::Path;
 
@@ -90,6 +91,15 @@ fn main() {
             .samples()
             .chunks(4)
             .flat_map(|px| [0, 1, 2].map(|c| (px[c].clamp(0.0, 1.0) * 255.0 + 0.5) as u8))
+            .collect(),
+        // A white dot at each point's nearest pixel.
+        PortType::PointSet => value
+            .points()
+            .unwrap()
+            .rasterise(spec)
+            .data
+            .iter()
+            .flat_map(|&v| [(v * 255.0) as u8; 3])
             .collect(),
     };
     image::RgbImage::from_raw(res, res, rgb)

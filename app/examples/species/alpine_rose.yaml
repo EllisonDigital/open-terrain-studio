@@ -1,0 +1,24 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Alpine rose
+node: vegetation.shrubs
+biome: alpine
+description: Low evergreen shrub of snow-sheltered slopes near the tree line.
+species: alpine_rose
+coverage: 0.65
+health: 0.7
+water_preference: 0.3
+spread_m: 8
+patches: 0.6
+patch_size_m: 40
+slope_min_deg: 8
+slope_max_deg: 38
+height_min_m: 1200
+height_max_m: 2200
+avoid_peaks: 0.5
+snow_tolerance: 0.9
+occupied_mode: intermingle
+dead_zones: 0.4
+spacing_m: 2
+scale_min: 0.5
+scale_max: 1.1

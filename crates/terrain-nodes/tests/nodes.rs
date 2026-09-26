@@ -59,6 +59,8 @@ fn tolerance(type_id: &str) -> (f64, f64) {
         // Derivatives and thresholds of derivatives.
         "data.slope" | "data.aspect" | "output.normal_map" => (0.01, 0.08),
         "data.curvature" | "adjust.sharpen" | "data.occlusion" => (0.01, 0.08),
+        // Rocks gather below a slope threshold, spread by a blur.
+        "vegetation.debris" => (0.01, 0.08),
         // Distances are exact to about one low-res cell (16 m of a 500 m fade).
         "data.distance" => (0.01, 0.05),
         _ => (0.002, 0.01),

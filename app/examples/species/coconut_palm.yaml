@@ -1,0 +1,24 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Coconut palm
+node: vegetation.trees
+biome: tropical
+description: Palm of low, sandy coasts and river mouths, in loose groves.
+species: coconut_palm
+coverage: 0.6
+health: 0.75
+water_preference: 0.5
+spread_m: 15
+patches: 0.45
+patch_size_m: 90
+randomness: 0.35
+slope_max_deg: 18
+height_min_m: 0
+height_max_m: 60
+height_falloff_m: 25
+avoid_peaks: 0.3
+snow_tolerance: 0
+dead_zones: 0.1
+spacing_m: 7
+scale_min: 0.8
+scale_max: 1.3

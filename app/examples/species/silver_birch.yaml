@@ -1,0 +1,25 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Silver birch
+node: vegetation.trees
+biome: temperate
+description: Pioneer broadleaf of damp valley floors and forest edges, clustering around other trees.
+species: silver_birch
+coverage: 0.7
+health: 0.75
+water_preference: 0.6
+spread_m: 15
+patches: 0.55
+patch_size_m: 90
+randomness: 0.35
+slope_max_deg: 28
+height_max_m: 1100
+height_falloff_m: 120
+avoid_peaks: 0.5
+snow_tolerance: 0.3
+occupied_mode: near
+occupied_strength: 0.8
+dead_zones: 0.4
+spacing_m: 5
+scale_min: 0.7
+scale_max: 1.15

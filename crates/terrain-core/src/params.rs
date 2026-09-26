@@ -73,6 +73,8 @@ pub enum ParamKind {
     File {
         filters: Vec<String>,
     },
+    /// A short line of text, e.g. a species name written into exported files.
+    Text,
 }
 
 /// Declaration of one node parameter. The Godot inspector is built from these.
@@ -200,6 +202,19 @@ impl ParamDef {
         }
     }
 
+    /// A line of text.
+    pub fn text(key: &str, label: &str, default: &str) -> Self {
+        Self {
+            key: key.into(),
+            label: label.into(),
+            kind: ParamKind::Text,
+            default: ParamValue::Text(default.into()),
+            unit: String::new(),
+            description: String::new(),
+            drivable: false,
+        }
+    }
+
     /// Allow a mask to drive this (float) parameter per cell.
     pub fn drivable(mut self) -> Self {
         debug_assert!(
@@ -262,6 +277,10 @@ impl ParamDef {
                 .as_str()
                 .map(|s| ParamValue::Text(s.trim().into()))
                 .ok_or_else(|| bad("expected a file path")),
+            ParamKind::Text => value
+                .as_str()
+                .map(|s| ParamValue::Text(s.trim().into()))
+                .ok_or_else(|| bad("expected text")),
         }
     }
 }

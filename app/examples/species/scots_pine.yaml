@@ -1,0 +1,24 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Scots pine
+node: vegetation.trees
+biome: temperate
+description: Hardy pine of dry, sandy and rocky ground up to the tree line, in open stands.
+species: scots_pine
+coverage: 0.75
+health: 0.85
+water_preference: -0.2
+spread_m: 25
+patches: 0.35
+patch_size_m: 180
+randomness: 0.3
+slope_max_deg: 38
+height_min_m: 150
+height_max_m: 1500
+height_falloff_m: 150
+avoid_peaks: 0.3
+snow_tolerance: 0.5
+dead_zones: 0.5
+spacing_m: 7
+scale_min: 0.75
+scale_max: 1.25

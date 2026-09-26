@@ -1,0 +1,25 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Swiss stone pine
+node: vegetation.trees
+biome: alpine
+description: Slow, wind-shaped pine of the high tree line, scattered on ridges and rocky slopes.
+species: swiss_stone_pine
+coverage: 0.55
+health: 0.7
+water_preference: -0.1
+spread_m: 20
+patches: 0.6
+patch_size_m: 120
+randomness: 0.45
+slope_max_deg: 42
+height_min_m: 1300
+height_max_m: 1950
+height_falloff_m: 120
+avoid_peaks: 0.1
+snow_tolerance: 0.8
+dead_zones: 0.6
+dead_slope_deg: 42
+spacing_m: 8
+scale_min: 0.6
+scale_max: 1.1

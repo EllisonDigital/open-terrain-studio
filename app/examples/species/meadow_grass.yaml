@@ -1,0 +1,21 @@
+# OpenTerrainStudio species preset (docs/vegetation.md). Altitudes are metres
+# for a world about 0-2,000 m high: adjust them to your world's height range.
+name: Meadow grass
+node: vegetation.grass
+biome: temperate
+description: Lowland grassland on gentle, open ground outside the woods.
+species: meadow_grass
+coverage: 0.9
+health: 0.85
+water_preference: 0.2
+spread_m: 5
+patches: 0.25
+patch_size_m: 35
+slope_max_deg: 30
+height_max_m: 1300
+occupied_mode: avoid
+occupied_strength: 0.8
+dead_zones: 0.2
+spacing_m: 2
+scale_min: 0.6
+scale_max: 1.4

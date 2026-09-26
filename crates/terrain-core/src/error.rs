@@ -29,6 +29,8 @@ pub enum CoreError {
     Cancelled,
     #[error("project file error: {0}")]
     Project(String),
+    #[error("species preset: {0}")]
+    Preset(String),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]

@@ -9,6 +9,7 @@ use crate::error::{CoreError, Result};
 use crate::gpu::{Gpu, GpuGrid};
 use crate::grid::{ColorGrid, Grid, GridSpec};
 use crate::params::{Curve, Gradient, ParamDef, ParamKind, ParamValue};
+use crate::points::PointSet;
 use crate::world::World;
 
 /// The type of data flowing through a port.
@@ -22,12 +23,14 @@ pub enum PortType {
     /// An sRGB colour with alpha per sample (colour maps, packed weights,
     /// normal maps).
     ColorMap,
+    /// Vegetation or debris instances ([`PointSet`]).
+    PointSet,
 }
 
 impl PortType {
     /// Can data of type `self` feed an input of type `input`?
     /// Heightfield and Mask convert into each other automatically; ColorMap
-    /// only feeds ColorMap.
+    /// only feeds ColorMap and PointSet only PointSet.
     pub fn can_feed(self, input: PortType) -> bool {
         matches!(
             (self, input),
@@ -35,7 +38,18 @@ impl PortType {
                 PortType::Heightfield | PortType::Mask,
                 PortType::Heightfield | PortType::Mask
             ) | (PortType::ColorMap, PortType::ColorMap)
+                | (PortType::PointSet, PortType::PointSet)
         )
+    }
+
+    /// The key used in schemas and by the editor, e.g. `color_map`.
+    pub fn key(self) -> &'static str {
+        match self {
+            PortType::Heightfield => "heightfield",
+            PortType::Mask => "mask",
+            PortType::ColorMap => "color_map",
+            PortType::PointSet => "point_set",
+        }
     }
 }
 
@@ -45,6 +59,7 @@ pub enum Value {
     Heightfield(Arc<Grid>),
     Mask(Arc<Grid>),
     ColorMap(Arc<ColorGrid>),
+    Points(Arc<PointSet>),
     /// A result still on the GPU; read back on first [`Value::grid`].
     Gpu(PortType, Arc<GpuGrid>),
 }
@@ -55,6 +70,7 @@ impl Value {
             Value::Heightfield(_) => PortType::Heightfield,
             Value::Mask(_) => PortType::Mask,
             Value::ColorMap(_) => PortType::ColorMap,
+            Value::Points(_) => PortType::PointSet,
             Value::Gpu(ty, _) => *ty,
         }
     }
@@ -62,12 +78,14 @@ impl Value {
     /// The data on the CPU (a GPU result is downloaded the first time).
     ///
     /// # Panics
-    /// For a colour map; use [`Value::color`] or [`Value::samples`].
+    /// For a colour map or point set; use [`Value::color`],
+    /// [`Value::points`] or [`Value::samples`].
     pub fn grid(&self) -> &Arc<Grid> {
         match self {
             Value::Heightfield(g) | Value::Mask(g) => g,
             Value::Gpu(_, g) => g.cpu(),
             Value::ColorMap(_) => panic!("a colour map has no single-channel grid"),
+            Value::Points(_) => panic!("a point set has no grid"),
         }
     }
 
@@ -79,19 +97,31 @@ impl Value {
         }
     }
 
-    /// Every sample value (every channel of every sample for a colour map),
-    /// e.g. for hashing or range checks.
+    /// The point set, if this is one.
+    pub fn points(&self) -> Option<&Arc<PointSet>> {
+        match self {
+            Value::Points(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Every sample value (every channel of every sample for a colour map;
+    /// every stored value of every point for a point set), e.g. for hashing
+    /// or range checks.
     pub fn samples(&self) -> &[f32] {
         match self {
             Value::ColorMap(c) => &c.data,
+            Value::Points(p) => &p.data,
             _ => &self.grid().data,
         }
     }
 
     /// One grid per channel: the grid itself, or red, green, blue and alpha.
+    /// None for a point set.
     pub fn channels(&self) -> Vec<Grid> {
         match self {
             Value::ColorMap(c) => (0..4).map(|i| c.channel(i)).collect(),
+            Value::Points(_) => Vec::new(),
             _ => vec![self.grid().as_ref().clone()],
         }
     }
@@ -100,6 +130,7 @@ impl Value {
     pub fn bytes(&self) -> usize {
         match self {
             Value::ColorMap(c) => c.data.len() * 4,
+            Value::Points(p) => p.data.len() * 4 + p.species_index.len() * 2,
             _ => self.spec().len() * 4,
         }
     }
@@ -109,6 +140,7 @@ impl Value {
         match self {
             Value::Heightfield(g) | Value::Mask(g) => g.spec,
             Value::ColorMap(c) => c.spec,
+            Value::Points(p) => p.spec,
             Value::Gpu(_, g) => g.spec,
         }
     }
@@ -123,8 +155,11 @@ impl Value {
             (Value::Mask(g), PortType::Heightfield) => {
                 Value::Heightfield(Arc::new(g.map(|m| world.denormalise(m))))
             }
-            // Colour maps only ever feed colour inputs (see `PortType::can_feed`).
-            (Value::ColorMap(_), _) | (_, PortType::ColorMap) => self.clone(),
+            // Colour maps and point sets only feed inputs of their own type
+            // (see `PortType::can_feed`).
+            (Value::ColorMap(_) | Value::Points(_), _) | (_, PortType::ColorMap | PortType::PointSet) => {
+                self.clone()
+            }
             (Value::Gpu(from, _), to) if *from == to => self.clone(),
             (Value::Gpu(from, g), to) => {
                 let span = world.height_span();
@@ -132,7 +167,7 @@ impl Value {
                 let (scale, offset) = match to {
                     PortType::Mask => (1.0 / span, -min / span),
                     PortType::Heightfield => (span, min),
-                    PortType::ColorMap => unreachable!(),
+                    PortType::ColorMap | PortType::PointSet => unreachable!(),
                 };
                 let gpu = Gpu::new(g.buffer.device().clone());
                 match gpu.affine(g.spec, &g.buffer, scale, offset) {
@@ -141,7 +176,9 @@ impl Value {
                         let cpu = match from {
                             PortType::Heightfield => Value::Heightfield(g.cpu().clone()),
                             PortType::Mask => Value::Mask(g.cpu().clone()),
-                            PortType::ColorMap => unreachable!("no GPU colour maps"),
+                            PortType::ColorMap | PortType::PointSet => {
+                                unreachable!("no GPU colour maps or points")
+                            }
                         };
                         cpu.convert(to, world)
                     }
@@ -463,6 +500,17 @@ impl<'a> EvalContext<'a> {
         self.inputs
             .get(key)
             .and_then(|v| v.color())
+            .ok_or_else(|| CoreError::MissingInput {
+                node: self.node_id.into(),
+                port: key.into(),
+            })
+    }
+
+    /// An input point set; errors if a required input is missing.
+    pub fn input_points(&self, key: &str) -> Result<&Arc<PointSet>> {
+        self.inputs
+            .get(key)
+            .and_then(|v| v.points())
             .ok_or_else(|| CoreError::MissingInput {
                 node: self.node_id.into(),
                 port: key.into(),
